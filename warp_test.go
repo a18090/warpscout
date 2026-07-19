@@ -96,14 +96,14 @@ func TestParseRegResp(t *testing.T) {
 	body := []byte(`{"id":"dev123","token":"tok456","config":{` +
 		`"interface":{"addresses":{"v4":"172.16.0.5/32"}},` +
 		`"peers":[{"public_key":"PEERPUBKEY"}]}}`)
-	a, id, token, err := parseRegResp(body, "MYPRIVKEY")
+	a, err := parseRegResp(body, "MYPRIVKEY")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if id != "dev123" || token != "tok456" {
-		t.Errorf("id/token = %q/%q", id, token)
+	if a.ID != "dev123" || a.Token != "tok456" {
+		t.Errorf("id/token = %q/%q", a.ID, a.Token)
 	}
-	if a.PrivateKey != "MYPRIVKEY" || a.PeerPublicKey != "PEERPUBKEY" || a.Address != "172.16.0.5" {
+	if a.PrivateKey != "MYPRIVKEY" || a.PeerPublicKey != "PEERPUBKEY" {
 		t.Errorf("account = %+v", a)
 	}
 }

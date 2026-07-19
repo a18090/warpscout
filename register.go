@@ -27,18 +27,19 @@ const (
 	cfClientVersion  = "a-6.11-2223"
 	cfUserAgent      = "okhttp/3.12.1"
 	defaultAccount   = "warpscout-account.json"
-	defaultWARPAddr  = "172.16.0.2"
 	apiReachTimeout  = 3 * time.Second
 	registerTimeout  = 15 * time.Second
 	tunnelDialTimout = 10 * time.Second
 )
 
 // account is the registered WARP config persisted between runs. PrivateKey is
-// ours (generateKeypair); PeerPublicKey comes from the /reg response.
+// ours (generateKeypair); PeerPublicKey, ID and Token come from the /reg
+// response. ID and Token are kept for future authenticated API requests.
 type account struct {
 	PrivateKey    string `json:"private_key"`
 	PeerPublicKey string `json:"peer_public_key"`
-	Address       string `json:"address"`
+	ID            string `json:"id"`
+	Token         string `json:"token"`
 }
 
 // generateKeypair replaces `wg genkey | wg pubkey`: a clamped Curve25519 private
@@ -88,9 +89,6 @@ func saveAccount(path string, a account) error {
 func applyAccount(a account) {
 	warpPrivateKey = a.PrivateKey
 	warpPublicKey = a.PeerPublicKey
-	if a.Address != "" {
-		warpAddress = a.Address
-	}
 }
 
 // regResp captures the fields we need from POST /reg (top-level, no envelope).
@@ -98,11 +96,6 @@ type regResp struct {
 	ID     string `json:"id"`
 	Token  string `json:"token"`
 	Config struct {
-		Interface struct {
-			Addresses struct {
-				V4 string `json:"v4"`
-			} `json:"addresses"`
-		} `json:"interface"`
 		Peers []struct {
 			PublicKey string `json:"public_key"`
 		} `json:"peers"`
@@ -110,24 +103,21 @@ type regResp struct {
 }
 
 // parseRegResp turns a /reg response body plus our private key into an account.
-func parseRegResp(body []byte, privateKey string) (account, string, string, error) {
+func parseRegResp(body []byte, privateKey string) (account, error) {
 	var r regResp
 	if err := json.Unmarshal(body, &r); err != nil {
-		return account{}, "", "", fmt.Errorf("parse reg response: %w", err)
+		return account{}, fmt.Errorf("parse reg response: %w", err)
 	}
 	if len(r.Config.Peers) == 0 || r.Config.Peers[0].PublicKey == "" {
-		return account{}, "", "", fmt.Errorf("reg response missing peer public key")
-	}
-	addr := strings.TrimSuffix(r.Config.Interface.Addresses.V4, "/32")
-	if addr == "" {
-		addr = defaultWARPAddr
+		return account{}, fmt.Errorf("reg response missing peer public key")
 	}
 	a := account{
 		PrivateKey:    privateKey,
 		PeerPublicKey: r.Config.Peers[0].PublicKey,
-		Address:       addr,
+		ID:            r.ID,
+		Token:         r.Token,
 	}
-	return a, r.ID, r.Token, nil
+	return a, nil
 }
 
 // registerWARP runs the two-request flow from REG.md over the given client
@@ -143,15 +133,15 @@ func registerWARP(ctx context.Context, client *http.Client) (account, error) {
 	if err != nil {
 		return account{}, fmt.Errorf("POST /reg: %w", err)
 	}
-	a, id, token, err := parseRegResp(body, priv)
+	a, err := parseRegResp(body, priv)
 	if err != nil {
 		return account{}, err
 	}
 
-	patchURL := fmt.Sprintf("%s/%s", regBaseURL, id)
-	if _, err := doJSON(ctx, client, http.MethodPatch, patchURL, token,
+	patchURL := fmt.Sprintf("%s/%s", regBaseURL, a.ID)
+	if _, err := doJSON(ctx, client, http.MethodPatch, patchURL, a.Token,
 		map[string]bool{"warp_enabled": true}); err != nil {
-		return account{}, fmt.Errorf("PATCH /reg/%s: %w", id, err)
+		return account{}, fmt.Errorf("PATCH /reg/%s: %w", a.ID, err)
 	}
 	return a, nil
 }
