@@ -34,33 +34,40 @@ func (r endpointResult) phasesMatch() bool {
 	return r.edge.colo == r.exit.colo && r.edge.loc == r.exit.loc
 }
 
-// writeReport prints every working endpoint with its phase-1 (direct edge) and
-// phase-2 (via tunnel) region/colo, whether they matched, and one ready-to-use
-// endpoint per subnet.
-func writeReport(w io.Writer, results []endpointResult) {
+// workingSorted returns the working endpoints sorted by exit colo then endpoint.
+func workingSorted(results []endpointResult) []endpointResult {
 	working := make([]endpointResult, 0, len(results))
 	for _, r := range results {
 		if r.ok {
 			working = append(working, r)
 		}
 	}
-
-	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
-	fmt.Fprintf(w, "  WARP endpoints: %d working / %d probed\n", len(working), len(results))
-	fmt.Fprintln(w, "  PHASE1 = direct edge (--resolve), PHASE2 = real exit via tunnel")
-	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
-
-	if len(working) == 0 {
-		fmt.Fprintln(w, "\nNo working endpoints found.")
-		return
-	}
-
 	sort.Slice(working, func(i, j int) bool {
 		if working[i].exit.colo != working[j].exit.colo {
 			return working[i].exit.colo < working[j].exit.colo
 		}
 		return working[i].endpoint < working[j].endpoint
 	})
+	return working
+}
+
+func writeHeader(w io.Writer, working, probed int) {
+	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
+	fmt.Fprintf(w, "  WARP endpoints: %d working / %d probed\n", working, probed)
+	fmt.Fprintln(w, "  PHASE1 = direct edge (--resolve), PHASE2 = real exit via tunnel")
+	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
+}
+
+// writeFullReport prints every working endpoint with its phase-1 (direct edge)
+// and phase-2 (via tunnel) region/colo, whether they matched, and one
+// ready-to-use endpoint per subnet. Goes to the report file.
+func writeFullReport(w io.Writer, results []endpointResult) {
+	working := workingSorted(results)
+	writeHeader(w, len(working), len(results))
+	if len(working) == 0 {
+		fmt.Fprintln(w, "\nNo working endpoints found.")
+		return
+	}
 
 	fmt.Fprintf(w, "\n  %-22s %-10s %-10s %s\n", "ENDPOINT", "PHASE1", "PHASE2", "MATCH")
 	for _, r := range working {
@@ -72,6 +79,38 @@ func writeReport(w io.Writer, results []endpointResult) {
 	}
 
 	writeSubnetPicks(w, working)
+}
+
+// writeConsole prints a compact summary: unique colos and regions found, plus
+// one working endpoint per subnet. The full per-endpoint table goes to the file.
+func writeConsole(w io.Writer, results []endpointResult) {
+	working := workingSorted(results)
+	writeHeader(w, len(working), len(results))
+	if len(working) == 0 {
+		fmt.Fprintln(w, "\nNo working endpoints found.")
+		return
+	}
+
+	fmt.Fprintf(w, "\n  Colo:    %s\n", uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }))
+	fmt.Fprintf(w, "  Regions: %s\n", uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }))
+
+	writeSubnetPicks(w, working)
+}
+
+// uniqueSorted collects the non-empty key(r) values, sorted and space-joined.
+func uniqueSorted(working []endpointResult, key func(endpointResult) string) string {
+	seen := make(map[string]struct{})
+	for _, r := range working {
+		if v := key(r); v != "" {
+			seen[v] = struct{}{}
+		}
+	}
+	vals := make([]string, 0, len(seen))
+	for v := range seen {
+		vals = append(vals, v)
+	}
+	sort.Strings(vals)
+	return strings.Join(vals, "  ")
 }
 
 // writeSubnetPicks prints one random working endpoint per subnet, with its real

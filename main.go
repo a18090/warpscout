@@ -4,7 +4,6 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"net/netip"
 	"os"
@@ -24,7 +23,7 @@ func main() {
 	// worker. 2s keeps a wide margin over real latency while cutting that stall.
 	timeoutSec := flag.Int("t", 2, "per-request timeout in seconds")
 	proto := flag.String("proto", "wg", "protocol: wg (WireGuard) or awg (AmneziaWG)")
-	output := flag.String("o", "", "also write the report to this file")
+	output := flag.String("o", "", "file for the full per-endpoint report (default warpscout-report-<timestamp>.txt)")
 	proxy := flag.String("proxy", "", "http(s)/socks5 proxy URL for registration")
 	register := flag.Bool("register", false, "only register a fresh WARP account (save it and exit, no scanning)")
 	accountPath := flag.String("account", defaultAccount, "path to cached WARP account file")
@@ -114,11 +113,15 @@ func main() {
 	}
 	fmt.Fprintln(os.Stderr)
 
-	writeReport(os.Stdout, results)
-	if *output != "" {
-		if err := writeToFile(*output, results); err != nil {
-			fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", *output, err)
-		}
+	writeConsole(os.Stdout, results)
+	reportPath := *output
+	if reportPath == "" {
+		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
+	}
+	if err := writeToFile(reportPath, results); err != nil {
+		fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", reportPath, err)
+	} else {
+		fmt.Fprintf(os.Stderr, "\nFull report written to %s\n", reportPath)
 	}
 }
 
@@ -312,7 +315,6 @@ func writeToFile(path string, results []endpointResult) error {
 		return err
 	}
 	defer f.Close()
-	var w io.Writer = f
-	writeReport(w, results)
+	writeFullReport(f, results)
 	return nil
 }
