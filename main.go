@@ -16,7 +16,7 @@ func main() {
 	errPal = palette{enabled: colorEnabled(os.Stderr)}
 	outPal := palette{enabled: colorEnabled(os.Stdout)}
 
-	awg, err := parseProto(opts.proto)
+	runs, err := parseProto(opts.proto)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
 		os.Exit(1)
@@ -45,7 +45,7 @@ func main() {
 	// The tunnel fallback only needs a handful of live endpoints, discovered on
 	// demand rather than from the full scan.
 	if !haveConfig {
-		a, err := obtainAccount(ctx, awg, opts.proxy, ips, opts.parallel, timeout)
+		a, err := obtainAccount(ctx, runs[0].awg, opts.proxy, ips, opts.parallel, timeout)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("registration failed: %v", err)))
 			if opts.proxy == "" {
@@ -86,33 +86,55 @@ func main() {
 	// Phase 2: bring up a small pool of persistent tunnels and reuse each across
 	// many IPs, reading the exit colo. Creating one tunnel per IP leaks gvisor
 	// stacks and OOMs (see tunnel.go), so live stacks are bounded to the pool.
-	results := make([]endpointResult, len(alive))
-	p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", opts.proto), len(alive), errPal)
-	work := func(tn *tunnel, i int) {
-		defer p2.inc()
-		e := alive[i]
-		r := endpointResult{ip: e.ip, edge: e.trace}
-		if t, endpoint, ok := tn.trace(ctx, e.ip, timeout); ok {
-			r.exit, r.endpoint, r.ok = t, endpoint, true
+	// With -proto both this runs once per protocol (wg first) over the same edges.
+	var phases []phaseResult
+	for _, run := range runs {
+		results := make([]endpointResult, len(alive))
+		// The durability ping check only makes sense for wg: awg's junk params
+		// already fix the death-on-data-volume, so a lost ping through an awg
+		// tunnel is measurement noise, not a real drop. Trust the awg trace.
+		durability := opts.durability
+		if run.awg {
+			durability = 0
 		}
-		results[i] = r
+		p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name), len(alive), errPal)
+		work := func(tn *tunnel, i int) {
+			defer p2.inc()
+			e := alive[i]
+			r := endpointResult{ip: e.ip, edge: e.trace}
+			if t, endpoint, ok, durable := tn.trace(ctx, e.ip, timeout, durability); ok {
+				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, durable
+			}
+			results[i] = r
+		}
+		if err := runTunnelPool(opts.tunnelParallel, run.awg, len(alive), work); err != nil {
+			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
+			os.Exit(1)
+		}
+		p2.stop(errPal.ok("done"))
+		phases = append(phases, phaseResult{run, results})
 	}
-	if err := runTunnelPool(opts.tunnelParallel, awg, len(alive), work); err != nil {
-		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-		os.Exit(1)
-	}
-	p2.stop(errPal.ok("done"))
 
-	writeConsole(os.Stdout, results, outPal)
+	if len(phases) == 1 {
+		writeConsole(os.Stdout, phases[0], outPal)
+	} else {
+		writeConsoleBoth(os.Stdout, phases, outPal)
+	}
 	reportPath := opts.output
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
 	}
-	if err := writeToFile(reportPath, results); err != nil {
+	if err := writeToFile(reportPath, phases); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", reportPath, err)))
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
 	}
+}
+
+// phaseResult pairs a protocol run with its per-endpoint results.
+type phaseResult struct {
+	run     protoRun
+	results []endpointResult
 }
 
 // tunnelCandidates is how many live endpoints the fallback discovers before it
@@ -226,14 +248,26 @@ func protoName(awg bool) string {
 	return "wg"
 }
 
-func parseProto(p string) (awg bool, err error) {
+// protoRun is one protocol to verify endpoints with.
+type protoRun struct {
+	awg  bool
+	name string
+}
+
+// parseProto expands -proto into the ordered list of runs. "both" verifies wg
+// first (preferred, no obfuscation) then awg.
+func parseProto(p string) ([]protoRun, error) {
+	wg := protoRun{false, "wg"}
+	awg := protoRun{true, "awg"}
 	switch p {
 	case "wg":
-		return false, nil
+		return []protoRun{wg}, nil
 	case "awg":
-		return true, nil
+		return []protoRun{awg}, nil
+	case "both":
+		return []protoRun{wg, awg}, nil
 	default:
-		return false, fmt.Errorf("invalid -proto %q: use wg or awg", p)
+		return nil, fmt.Errorf("invalid -proto %q: use wg, awg or both", p)
 	}
 }
 
@@ -300,12 +334,20 @@ func runTunnelPool(workers int, awg bool, n int, fn func(tn *tunnel, i int)) err
 	return nil
 }
 
-func writeToFile(path string, results []endpointResult) error {
+func writeToFile(path string, phases []phaseResult) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	writeFullReport(f, results)
+	for i, ph := range phases {
+		if len(phases) > 1 {
+			if i > 0 {
+				fmt.Fprintln(f)
+			}
+			fmt.Fprintf(f, "########## proto=%s ##########\n", ph.run.name)
+		}
+		writeFullReport(f, ph.results)
+	}
 	return nil
 }

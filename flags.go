@@ -12,6 +12,7 @@ type options struct {
 	parallel       int
 	tunnelParallel int
 	timeoutSec     int
+	durability     int
 	perSubnet      int
 	proto          string
 	output         string
@@ -41,11 +42,12 @@ var flagGroups = []flagGroup{
 		{"j", "jobs", "N", "phase 1 discovery workers"},
 		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
 		{"t", "timeout", "SEC", "per-request timeout"},
+		{"d", "durability", "N", "durability probe pings per working tunnel (wg only, ignored for awg); 0 disables"},
 		{"n", "sample", "N", "addresses to sample per /24 subnet"},
 		{"f", "full", "", "scan all 256 addresses per /24 (overrides -sample)"},
 	}},
 	{"Protocol & registration", []flagSpec{
-		{"p", "proto", "wg|awg", "tunnel protocol: wg (WireGuard) or awg (AmneziaWG)"},
+		{"p", "proto", "wg|awg|both", "tunnel protocol: wg (WireGuard), awg (AmneziaWG), or both"},
 		{"x", "proxy", "URL", "http(s)/socks5 proxy for registration"},
 		{"r", "register", "", "register a fresh WARP account, save it and exit"},
 		{"a", "account", "FILE", "cached WARP account file"},
@@ -83,6 +85,10 @@ func parseFlags() options {
 	// long a dead endpoint (answers HTTPS in phase 1 but no tunnel) stalls a
 	// worker. 2s keeps a wide margin over real latency while cutting that stall.
 	intFlag(&o.timeoutSec, 2, "t", "timeout")
+	// A working tunnel is pinged this many times: TSPU passes a WG handshake and
+	// a few packets, then drops the peer, so a single fetch false-positives. Any
+	// lost reply marks it flaky.
+	intFlag(&o.durability, 10, "d", "durability")
 	intFlag(&o.perSubnet, 10, "n", "sample")
 	strFlag(&o.proto, "wg", "p", "proto")
 	strFlag(&o.output, "", "o", "output")

@@ -17,7 +17,13 @@ type endpointResult struct {
 	endpoint string      // ip:port that completed the handshake
 	exit     traceResult // phase 2: real exit seen through the tunnel
 	ok       bool        // handshake + trace through the tunnel succeeded
+	durable  bool        // survived the re-probe (meaningful only when ok)
 }
+
+// working is a durable endpoint; flaky passed once but died on the re-probe
+// (TSPU dropped the peer after a few packets).
+func (r endpointResult) working() bool { return r.ok && r.durable }
+func (r endpointResult) flaky() bool   { return r.ok && !r.durable }
 
 // regionColo renders "loc/colo" (e.g. RU/DME), with "?" for missing fields.
 func regionColo(t traceResult) string {
@@ -35,21 +41,30 @@ func (r endpointResult) phasesMatch() bool {
 	return r.edge.colo == r.exit.colo && r.edge.loc == r.exit.loc
 }
 
-// workingSorted returns the working endpoints sorted by exit colo then endpoint.
+// workingSorted returns the durable endpoints sorted by exit colo then endpoint.
 func workingSorted(results []endpointResult) []endpointResult {
-	working := make([]endpointResult, 0, len(results))
+	return filterSorted(results, endpointResult.working)
+}
+
+// flakySorted returns the endpoints that passed once but died on the re-probe.
+func flakySorted(results []endpointResult) []endpointResult {
+	return filterSorted(results, endpointResult.flaky)
+}
+
+func filterSorted(results []endpointResult, keep func(endpointResult) bool) []endpointResult {
+	out := make([]endpointResult, 0, len(results))
 	for _, r := range results {
-		if r.ok {
-			working = append(working, r)
+		if keep(r) {
+			out = append(out, r)
 		}
 	}
-	sort.Slice(working, func(i, j int) bool {
-		if working[i].exit.colo != working[j].exit.colo {
-			return working[i].exit.colo < working[j].exit.colo
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].exit.colo != out[j].exit.colo {
+			return out[i].exit.colo < out[j].exit.colo
 		}
-		return working[i].endpoint < working[j].endpoint
+		return out[i].endpoint < out[j].endpoint
 	})
-	return working
+	return out
 }
 
 func writeHeader(w io.Writer, working, probed int) {
@@ -64,8 +79,12 @@ func writeHeader(w io.Writer, working, probed int) {
 // ready-to-use endpoint per subnet. Goes to the report file.
 func writeFullReport(w io.Writer, results []endpointResult) {
 	working := workingSorted(results)
+	flaky := flakySorted(results)
 	writeHeader(w, len(working), len(results))
-	if len(working) == 0 {
+	if len(flaky) > 0 {
+		fmt.Fprintf(w, "  %d flaky (handshake ok, dropped on re-probe)\n", len(flaky))
+	}
+	if len(working) == 0 && len(flaky) == 0 {
 		fmt.Fprintln(w, "\nNo working endpoints found.")
 		return
 	}
@@ -73,7 +92,8 @@ func writeFullReport(w io.Writer, results []endpointResult) {
 	fmt.Fprintf(w, "\n  %-22s %-10s %-10s %s\n", "ENDPOINT", "PHASE1", "PHASE2", "MATCH")
 	for _, base := range pools {
 		subnet := subnetEndpoints(working, base)
-		if len(subnet) == 0 {
+		subnetFlaky := subnetEndpoints(flaky, base)
+		if len(subnet) == 0 && len(subnetFlaky) == 0 {
 			continue
 		}
 		fmt.Fprintf(w, "\n  ── %s0/24 ──\n", base)
@@ -90,9 +110,14 @@ func writeFullReport(w io.Writer, results []endpointResult) {
 				fmt.Fprintf(w, "    %-22s %-10s %-10s %s\n", r.endpoint, regionColo(r.edge), regionColo(r.exit), match)
 			}
 		}
+		for _, r := range subnetFlaky {
+			fmt.Fprintf(w, "    %-22s %-10s %-10s %s\n", r.endpoint, regionColo(r.edge), regionColo(r.exit), "flaky")
+		}
 	}
 
-	writeSubnetPicks(w, working)
+	if len(working) > 0 {
+		writeSubnetPicks(w, working)
+	}
 }
 
 // subnetEndpoints returns the working endpoints whose IP falls in the base /24.
@@ -126,30 +151,51 @@ func exitColos(picks []endpointResult) []string {
 // the working/probed counts, the unique colos and regions found, and a boxed
 // table of one working endpoint per subnet. The full per-endpoint report goes
 // to the file (writeFullReport, plain text).
-func writeConsole(w io.Writer, results []endpointResult, pal palette) {
+func writeConsole(w io.Writer, ph phaseResult, pal palette) {
+	results := ph.results
 	working := workingSorted(results)
+	flaky := flakySorted(results)
+	fmt.Fprintln(w) // blank line between the phase-2 progress and the table
 	if len(working) == 0 {
 		fmt.Fprintln(w, pal.fail("No working endpoints found."))
+		writeFlakyNote(w, pal, len(flaky))
 		return
 	}
 
 	writeBanner(w, pal, len(working), len(results))
+	fmt.Fprintf(w, "  Proto:    %s\n", pal.accent(strings.ToUpper(ph.run.name)))
 	fmt.Fprintf(w, "  Colo:     %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo })))
 	fmt.Fprintf(w, "  Regions:  %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc })))
-	writePicksTable(w, pal, working)
+	writeFlakyNote(w, pal, len(flaky))
+	writePicksTable(w, pal, working, flaky)
+}
+
+// writeFlakyNote prints the count of endpoints that handshook but were dropped
+// on the re-probe, if any.
+func writeFlakyNote(w io.Writer, pal palette, n int) {
+	if n == 0 {
+		return
+	}
+	fmt.Fprintf(w, "  Flaky:    %s\n", pal.warn(fmt.Sprintf("%d (handshake ok, dropped on re-probe)", n)))
 }
 
 const bannerWidth = 52
 
 // writeBanner prints a rounded box with the working/probed headline.
 func writeBanner(w io.Writer, pal palette, working, probed int) {
-	label := fmt.Sprintf("  WARPSCOUT   %d working / %d probed", working, probed)
-	pad := bannerWidth - len([]rune(label))
+	plain := fmt.Sprintf("  WARPSCOUT   %d working / %d probed", working, probed)
+	body := "  " + pal.title("WARPSCOUT") + "   " + pal.ok(strconv.Itoa(working)) + " working" +
+		pal.dim(" / ") + strconv.Itoa(probed) + " probed"
+	writeBox(w, pal, plain, body)
+}
+
+// writeBox draws a rounded box around one headline. plain is the uncolored text
+// (used only to size the padding); body is the colored text to print.
+func writeBox(w io.Writer, pal palette, plain, body string) {
+	pad := bannerWidth - len([]rune(plain))
 	if pad < 0 {
 		pad = 0
 	}
-	body := "  " + pal.title("WARPSCOUT") + "   " + pal.ok(strconv.Itoa(working)) + " working" +
-		pal.dim(" / ") + strconv.Itoa(probed) + " probed"
 	fmt.Fprintln(w, pal.dim("╭"+strings.Repeat("─", bannerWidth)+"╮"))
 	fmt.Fprintf(w, "%s%s%s%s\n", pal.dim("│"), body, strings.Repeat(" ", pad), pal.dim("│"))
 	fmt.Fprintln(w, pal.dim("╰"+strings.Repeat("─", bannerWidth)+"╯"))
@@ -162,8 +208,9 @@ const (
 	colExit     = 8
 )
 
-// writePicksTable prints a boxed table of one random working endpoint per subnet.
-func writePicksTable(w io.Writer, pal palette, working []endpointResult) {
+// writePicksTable prints a boxed table of one random endpoint per subnet: a
+// durable one when available, otherwise a flaky one flagged in yellow.
+func writePicksTable(w io.Writer, pal palette, working, flaky []endpointResult) {
 	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
 	border := func(l, m, r string) string {
 		return l + strings.Repeat("─", colSubnet+2) + m + strings.Repeat("─", colEndpoint+2) + m +
@@ -179,16 +226,114 @@ func writePicksTable(w io.Writer, pal palette, working []endpointResult) {
 	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("EXIT", colExit))))
 	fmt.Fprintln(w, "  "+pal.dim(border("├", "┼", "┤")))
 	for _, base := range pools {
-		picks := subnetEndpoints(working, base)
 		subnet := pad(base+"0/24", colSubnet)
-		if len(picks) == 0 {
-			fmt.Fprintln(w, row(subnet, pal.fail(pad("no working endpoints", colEndpoint)), pad("", colExit)))
+		if picks := subnetEndpoints(working, base); len(picks) > 0 {
+			r := picks[rand.Intn(len(picks))]
+			fmt.Fprintln(w, row(subnet, pal.addr(pad(r.endpoint, colEndpoint)), pal.accent(pad(regionColo(r.exit), colExit))))
 			continue
 		}
-		r := picks[rand.Intn(len(picks))]
-		fmt.Fprintln(w, row(subnet, pal.addr(pad(r.endpoint, colEndpoint)), pal.accent(pad(regionColo(r.exit), colExit))))
+		if picks := subnetEndpoints(flaky, base); len(picks) > 0 {
+			r := picks[rand.Intn(len(picks))]
+			fmt.Fprintln(w, row(subnet, pal.warn(pad(r.endpoint, colEndpoint)), pal.warn(pad("flaky", colExit))))
+			continue
+		}
+		fmt.Fprintln(w, row(subnet, pal.fail(pad("no working endpoints", colEndpoint)), pad("", colExit)))
 	}
 	fmt.Fprintln(w, "  "+pal.dim(border("└", "┴", "┘")))
+}
+
+const colProto = 6
+
+// writeConsoleBoth renders the -proto both comparison: per subnet, whether wg
+// and awg each yield a durable (OK), flaky, or no (-) endpoint, plus one
+// concrete endpoint to use (a durable wg one preferred). Directly answers which
+// subnets work on plain WireGuard and which need AmneziaWG obfuscation.
+func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
+	var wg, awg []endpointResult
+	for _, ph := range phases {
+		if ph.run.awg {
+			awg = ph.results
+		} else {
+			wg = ph.results
+		}
+	}
+	wgWork, wgFlaky := workingSorted(wg), flakySorted(wg)
+	awgWork, awgFlaky := workingSorted(awg), flakySorted(awg)
+
+	probed := len(wg)
+	if probed == 0 {
+		probed = len(awg)
+	}
+	fmt.Fprintln(w)
+	plain := fmt.Sprintf("  WARPSCOUT   wg %d / awg %d working of %d probed", len(wgWork), len(awgWork), probed)
+	body := "  " + pal.title("WARPSCOUT") + "   wg " + pal.ok(strconv.Itoa(len(wgWork))) +
+		pal.dim(" / ") + "awg " + pal.ok(strconv.Itoa(len(awgWork))) + " working of " + strconv.Itoa(probed) + " probed"
+	writeBox(w, pal, plain, body)
+	fmt.Fprintln(w)
+
+	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
+	widths := []int{colSubnet, colProto, colProto, colEndpoint, colExit}
+	border := func(l, m, r string) string {
+		parts := make([]string, len(widths))
+		for i, n := range widths {
+			parts[i] = strings.Repeat("─", n+2)
+		}
+		return l + strings.Join(parts, m) + r
+	}
+	row := func(cells ...string) string {
+		bar := pal.dim("│")
+		out := "  " + bar
+		for _, c := range cells {
+			out += " " + c + " " + bar
+		}
+		return out
+	}
+	statusCell := func(work, flaky []endpointResult, base string) string {
+		if len(subnetEndpoints(work, base)) > 0 {
+			return pal.ok(pad("OK", colProto))
+		}
+		if len(subnetEndpoints(flaky, base)) > 0 {
+			return pal.warn(pad("flaky", colProto))
+		}
+		return pal.dim(pad("-", colProto))
+	}
+
+	fmt.Fprintln(w, "  "+pal.title("WireGuard vs AmneziaWG per subnet"))
+	fmt.Fprintln(w, "  "+pal.dim(border("┌", "┬", "┐")))
+	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("WG", colProto)), pal.title(pad("AWG", colProto)),
+		pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("EXIT", colExit))))
+	fmt.Fprintln(w, "  "+pal.dim(border("├", "┼", "┤")))
+	for _, base := range pools {
+		subnet := pad(base+"0/24", colSubnet)
+		wgCell := statusCell(wgWork, wgFlaky, base)
+		awgCell := statusCell(awgWork, awgFlaky, base)
+		endpoint, exit, flaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
+		if endpoint == "" {
+			fmt.Fprintln(w, row(subnet, wgCell, awgCell, pal.dim(pad("-", colEndpoint)), pad("", colExit)))
+			continue
+		}
+		endpointCell := pal.addr(pad(endpoint, colEndpoint))
+		exitCell := pal.accent(pad(exit, colExit))
+		if flaky {
+			endpointCell = pal.warn(pad(endpoint, colEndpoint))
+			exitCell = pal.warn(pad(exit, colExit))
+		}
+		fmt.Fprintln(w, row(subnet, wgCell, awgCell, endpointCell, exitCell))
+	}
+	fmt.Fprintln(w, "  "+pal.dim(border("└", "┴", "┘")))
+}
+
+// bestPick returns one endpoint to use for a subnet, preferring a durable wg one,
+// then durable awg, then flaky wg, then flaky awg. flaky reports whether the
+// chosen endpoint is only flaky. Empty endpoint means nothing worked.
+func bestPick(base string, sets ...[]endpointResult) (endpoint, exit string, flaky bool) {
+	for i, set := range sets {
+		if picks := subnetEndpoints(set, base); len(picks) > 0 {
+			r := picks[rand.Intn(len(picks))]
+			return r.endpoint, regionColo(r.exit), i >= 2 // sets[2:] are the flaky lists
+		}
+	}
+	return "", "", false
 }
 
 // uniqueSorted collects the non-empty key(r) values, sorted and space-joined.

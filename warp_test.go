@@ -11,16 +11,20 @@ import (
 )
 
 func TestWriteConsolePalette(t *testing.T) {
-	res := []endpointResult{{
-		ip:       netip.MustParseAddr("8.47.69.86"),
-		edge:     traceResult{loc: "RU", colo: "DME"},
-		exit:     traceResult{loc: "RU", colo: "DME"},
-		endpoint: "8.47.69.86:2408",
-		ok:       true,
-	}}
+	ph := phaseResult{
+		run: protoRun{false, "wg"},
+		results: []endpointResult{{
+			ip:       netip.MustParseAddr("8.47.69.86"),
+			edge:     traceResult{loc: "RU", colo: "DME"},
+			exit:     traceResult{loc: "RU", colo: "DME"},
+			endpoint: "8.47.69.86:2408",
+			ok:       true,
+			durable:  true,
+		}},
+	}
 
 	var plain bytes.Buffer
-	writeConsole(&plain, res, palette{enabled: false})
+	writeConsole(&plain, ph, palette{enabled: false})
 	if strings.Contains(plain.String(), "\033") {
 		t.Error("plain (non-TTY) console output must not contain ANSI escapes")
 	}
@@ -29,9 +33,28 @@ func TestWriteConsolePalette(t *testing.T) {
 	}
 
 	var colored bytes.Buffer
-	writeConsole(&colored, res, palette{enabled: true})
+	writeConsole(&colored, ph, palette{enabled: true})
 	if !strings.Contains(colored.String(), "\033") {
 		t.Error("colored console output should contain ANSI escapes")
+	}
+}
+
+func TestDurableVerdict(t *testing.T) {
+	cases := []struct {
+		name    string
+		results []bool
+		want    bool
+	}{
+		{"all ok", []bool{true, true, true, true}, true},
+		{"any single loss is flaky", []bool{true, false, true, true}, false},
+		{"tail drop (TSPU)", []bool{true, true, true, false, false}, false},
+		{"first loss is flaky", []bool{false, true, true}, false},
+		{"empty is durable", nil, true},
+	}
+	for _, c := range cases {
+		if got := durableVerdict(c.results); got != c.want {
+			t.Errorf("%s: durableVerdict(%v) = %v, want %v", c.name, c.results, got, c.want)
+		}
 	}
 }
 

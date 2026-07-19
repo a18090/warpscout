@@ -12,6 +12,8 @@ import (
 	"github.com/amnezia-vpn/amneziawg-go/conn"
 	"github.com/amnezia-vpn/amneziawg-go/device"
 	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 // cloudflareIP is dialed through the tunnel for the trace request, avoiding any
@@ -67,15 +69,16 @@ func (t *tunnel) Close() { t.dev.Close() }
 
 // trace points the tunnel at ip (trying each candidate port in order), confirms
 // the handshake by fetching /cdn-cgi/trace through it, and returns the real exit
-// colo. endpoint is the ip:port that worked.
-func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration) (tr traceResult, endpoint string, ok bool) {
+// colo. endpoint is the ip:port that worked. durable reports whether the tunnel
+// survived the re-probe (see traceEndpoint); it is meaningful only when ok.
+func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int) (tr traceResult, endpoint string, ok, durable bool) {
 	for _, port := range warpPorts {
 		endpoint = fmt.Sprintf("%s:%d", ip, port)
-		if tr, ok = t.traceEndpoint(ctx, endpoint, timeout); ok {
-			return tr, endpoint, true
+		if tr, durable, ok = t.traceEndpoint(ctx, endpoint, timeout, pings); ok {
+			return tr, endpoint, true, durable
 		}
 	}
-	return traceResult{}, endpoint, false
+	return traceResult{}, endpoint, false, false
 }
 
 // connect points the tunnel at ip (first candidate port that completes a
@@ -97,30 +100,107 @@ func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Durati
 	return false
 }
 
-func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration) (traceResult, bool) {
+// traceEndpoint brings the peer up and fetches the trace. When pings > 0 it then
+// pings through the same established session to catch the delayed drop:
+// censorship gear (TSPU) lets a WireGuard handshake and a few packets through,
+// then drops the flagged peer, so a single fetch is a false positive. durable is
+// meaningful only when ok (the initial fetch succeeded).
+func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int) (tr traceResult, durable, ok bool) {
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
-		return traceResult{}, false
+		return traceResult{}, false, false
 	}
 	if err := t.dev.IpcSet(peer); err != nil {
-		return traceResult{}, false
+		return traceResult{}, false, false
 	}
 
 	// persistent_keepalive triggers a handshake initiation. Wait for it to
 	// complete before sending traffic, otherwise the first TCP SYN is dropped by
 	// the not-yet-established peer and netstack stalls past the timeout.
 	if !waitHandshake(ctx, t.dev, timeout) {
-		return traceResult{}, false
+		return traceResult{}, false, false
 	}
 
+	body, ok := t.fetch(ctx, timeout)
+	if !ok {
+		return traceResult{}, false, false
+	}
+	if pings <= 0 {
+		return parseTrace(body), true, true
+	}
+	return parseTrace(body), t.pingDurable(pings, timeout), true
+}
+
+// fetch does one trace request through the currently established peer.
+func (t *tunnel) fetch(ctx context.Context, timeout time.Duration) (string, bool) {
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	t.client.Timeout = timeout
-	body, ok := fetchTrace(reqCtx, t.client, traceURL)
-	if !ok {
-		return traceResult{}, false
+	return fetchTrace(reqCtx, t.client, traceURL)
+}
+
+const (
+	pingTarget   = "1.1.1.1"
+	pingInterval = 500 * time.Millisecond
+)
+
+// pingDurable sends up to count ICMP echoes through the established tunnel to
+// 1.1.1.1 and returns whether every one round-tripped. A censored (TSPU-dropped)
+// peer passes the first few packets, then dies on data volume and never
+// recovers, so any lost reply means flaky - it stops early on the first loss.
+//
+// ponytail: falls back to durable=true if ICMP can't be set up at all, so an
+// endpoint whose data path already proved good via the TCP trace is never
+// downgraded just because the ping socket failed to open.
+func (t *tunnel) pingDurable(count int, timeout time.Duration) bool {
+	dst := netip.MustParseAddr(pingTarget)
+	pc, err := t.tnet.DialPingAddr(netip.Addr{}, dst)
+	if err != nil {
+		return true
 	}
-	return parseTrace(body), true
+	defer pc.Close()
+
+	buf := make([]byte, 1500)
+	var results []bool
+	for seq := 0; seq < count; seq++ {
+		if seq > 0 {
+			time.Sleep(pingInterval)
+		}
+		results = append(results, t.pingOnce(pc, seq, buf, timeout))
+		if !durableVerdict(results) {
+			return false // a reply was lost, stop early
+		}
+	}
+	return true
+}
+
+// durableVerdict reports whether every ping so far round-tripped. A single lost
+// reply means the peer is dying on data volume (flaky), so it is not tolerated.
+func durableVerdict(results []bool) bool {
+	for _, ok := range results {
+		if !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// pingOnce sends one echo and reports whether a reply came back within timeout.
+func (t *tunnel) pingOnce(pc *netstack.PingConn, seq int, buf []byte, timeout time.Duration) bool {
+	msg := icmp.Message{
+		Type: ipv4.ICMPTypeEcho,
+		Body: &icmp.Echo{ID: 0xbeef, Seq: seq, Data: []byte("warpscout")},
+	}
+	wire, err := msg.Marshal(nil)
+	if err != nil {
+		return false
+	}
+	if _, err := pc.Write(wire); err != nil {
+		return false
+	}
+	pc.SetReadDeadline(time.Now().Add(timeout))
+	_, err = pc.Read(buf)
+	return err == nil
 }
 
 // waitHandshake polls the device until the peer reports a completed handshake

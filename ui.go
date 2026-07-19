@@ -55,6 +55,7 @@ func (p palette) title(s string) string  { return p.paint(ansiBold, s) }
 func (p palette) ok(s string) string     { return p.paint(ansiGreen, s) }
 func (p palette) fail(s string) string   { return p.paint(ansiRed, s) }
 func (p palette) dim(s string) string    { return p.paint(ansiDim, s) }
+func (p palette) warn(s string) string   { return p.paint(ansiYellow, s) }
 func (p palette) accent(s string) string { return p.paint(ansiCyan, s) }
 func (p palette) addr(s string) string   { return p.paint(ansiBold, s) }
 
