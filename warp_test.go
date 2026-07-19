@@ -15,7 +15,6 @@ func TestWriteConsolePalette(t *testing.T) {
 		run: protoRun{false, "wg"},
 		results: []endpointResult{{
 			ip:       netip.MustParseAddr("8.47.69.86"),
-			edge:     traceResult{loc: "RU", colo: "DME"},
 			exit:     traceResult{loc: "RU", colo: "DME"},
 			endpoint: "8.47.69.86:2408",
 			ok:       true,

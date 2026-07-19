@@ -13,7 +13,6 @@ import (
 // endpointResult is the outcome of the full check for one IP.
 type endpointResult struct {
 	ip       netip.Addr
-	edge     traceResult // phase 1: direct edge that answered
 	endpoint string      // ip:port that completed the handshake
 	exit     traceResult // phase 2: real exit seen through the tunnel
 	ok       bool        // handshake + trace through the tunnel succeeded
@@ -35,10 +34,6 @@ func regionColo(t traceResult) string {
 		colo = "?"
 	}
 	return loc + "/" + colo
-}
-
-func (r endpointResult) phasesMatch() bool {
-	return r.edge.colo == r.exit.colo && r.edge.loc == r.exit.loc
 }
 
 // workingSorted returns the durable endpoints sorted by exit colo then endpoint.
@@ -70,13 +65,13 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 func writeHeader(w io.Writer, working, probed int) {
 	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
 	fmt.Fprintf(w, "  WARP endpoints: %d working / %d probed\n", working, probed)
-	fmt.Fprintln(w, "  PHASE1 = direct edge (--resolve), PHASE2 = real exit via tunnel")
+	fmt.Fprintln(w, "  EXIT = real exit region/colo seen through the tunnel")
 	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
 }
 
-// writeFullReport prints every working endpoint with its phase-1 (direct edge)
-// and phase-2 (via tunnel) region/colo, whether they matched, and one
-// ready-to-use endpoint per subnet. Goes to the report file.
+// writeFullReport prints every working endpoint grouped by its exit region/colo,
+// the flaky ones, and one ready-to-use endpoint per subnet. Goes to the report
+// file.
 func writeFullReport(w io.Writer, results []endpointResult) {
 	working := workingSorted(results)
 	flaky := flakySorted(results)
@@ -89,7 +84,6 @@ func writeFullReport(w io.Writer, results []endpointResult) {
 		return
 	}
 
-	fmt.Fprintf(w, "\n  %-22s %-10s %-10s %s\n", "ENDPOINT", "PHASE1", "PHASE2", "MATCH")
 	for _, base := range pools {
 		subnet := subnetEndpoints(working, base)
 		subnetFlaky := subnetEndpoints(flaky, base)
@@ -103,15 +97,11 @@ func writeFullReport(w io.Writer, results []endpointResult) {
 				if regionColo(r.exit) != colo {
 					continue
 				}
-				match := "✓"
-				if !r.phasesMatch() {
-					match = "✗"
-				}
-				fmt.Fprintf(w, "    %-22s %-10s %-10s %s\n", r.endpoint, regionColo(r.edge), regionColo(r.exit), match)
+				fmt.Fprintf(w, "      %s\n", r.endpoint)
 			}
 		}
 		for _, r := range subnetFlaky {
-			fmt.Fprintf(w, "    %-22s %-10s %-10s %s\n", r.endpoint, regionColo(r.edge), regionColo(r.exit), "flaky")
+			fmt.Fprintf(w, "    %-22s %-10s %s\n", r.endpoint, regionColo(r.exit), "flaky")
 		}
 	}
 

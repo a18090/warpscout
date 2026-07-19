@@ -29,9 +29,10 @@ const (
 	awgI1   = "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"
 )
 
-// Candidate WARP UDP ports, tried in order until one completes a handshake.
-// ponytail: single known port for now; extend the slice when more are discovered.
-var warpPorts = []int{2408}
+// Candidate WARP UDP ports (the endpoint.ports list from a /reg response), tried
+// in order until one completes a handshake. Phase 1 (reachablePorts) narrows this
+// to the ports that get through the current network before phase 2 scans.
+var warpPorts = []int{2408, 500, 1701, 4500}
 
 func base64ToHex(b64 string) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(b64)

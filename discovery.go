@@ -11,9 +11,10 @@ import (
 
 const traceURL = "https://cloudflare.com/cdn-cgi/trace"
 
-// discoverColo does the phase-1 check: a direct HTTPS request to Cloudflare's
-// edge with the connection forced to ip (equivalent to curl --resolve). It
-// reports which edge colo answers for that IP, without any tunnel.
+// discoverColo makes a direct HTTPS request to Cloudflare's edge with the
+// connection forced to ip (equivalent to curl --resolve), reporting which edge
+// colo answers for that IP without any tunnel. Used by discoverAlive to find
+// live endpoints for the registration fallback.
 func discoverColo(ctx context.Context, ip netip.Addr, timeout time.Duration) (traceResult, bool) {
 	dialer := &net.Dialer{Timeout: timeout}
 	transport := &http.Transport{

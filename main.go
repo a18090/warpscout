@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/netip"
 	"os"
@@ -45,7 +46,7 @@ func main() {
 	// The tunnel fallback only needs a handful of live endpoints, discovered on
 	// demand rather than from the full scan.
 	if !haveConfig {
-		a, err := obtainAccount(ctx, runs[0].awg, opts.proxy, ips, opts.parallel, timeout)
+		a, err := obtainAccount(ctx, runs[0].awg, opts.proxy, ips, fallbackDiscoveryWorkers, timeout)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("registration failed: %v", err)))
 			if opts.proxy == "" {
@@ -65,31 +66,32 @@ func main() {
 		return
 	}
 
-	// Phase 1: keep only IPs whose edge answers, remembering its region/colo.
-	type edge struct {
-		ip    netip.Addr
-		trace traceResult
+	// Phase 1: find which WARP ports get through this network. Reachability is a
+	// network property (DPI / port filtering), not per-IP, so this probes a sample
+	// rather than every IP; phase 2 then scans all IPs on only the reachable ports.
+	// Probe with awg when any run needs it: AmneziaWG's junk evades DPI that plain
+	// wg trips, so its reachable ports are a superset - narrowing on wg could drop
+	// a port the awg run needs.
+	fmt.Fprintln(os.Stderr, errPal.dim("Phase 1: probing reachable WARP ports..."))
+	open, err := reachablePorts(ctx, anyAWG(runs), ips, timeout, portProbeSample)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("phase 1 failed: %v", err)))
+		os.Exit(1)
 	}
-	var alive []edge
-	var mu sync.Mutex
-	p1 := newProgress("Phase 1: discovering edge colo", len(ips), errPal)
-	runPool(opts.parallel, len(ips), func(i int) {
-		defer p1.inc()
-		if t, ok := discoverColo(ctx, ips[i], timeout); ok {
-			mu.Lock()
-			alive = append(alive, edge{ips[i], t})
-			mu.Unlock()
-		}
-	})
-	p1.stop(errPal.ok(fmt.Sprintf("%d responsive IPs", len(alive))))
+	if len(open) == 0 {
+		fmt.Fprintln(os.Stderr, errPal.fail("no WARP port is reachable on this network"))
+		os.Exit(1)
+	}
+	warpPorts = open // narrow phase 2 to the reachable ports
+	fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Reachable ports: %v", open)))
 
 	// Phase 2: bring up a small pool of persistent tunnels and reuse each across
 	// many IPs, reading the exit colo. Creating one tunnel per IP leaks gvisor
 	// stacks and OOMs (see tunnel.go), so live stacks are bounded to the pool.
-	// With -proto both this runs once per protocol (wg first) over the same edges.
+	// With -proto both this runs once per protocol (wg first) over the same IPs.
 	var phases []phaseResult
 	for _, run := range runs {
-		results := make([]endpointResult, len(alive))
+		results := make([]endpointResult, len(ips))
 		// The durability ping check only makes sense for wg: awg's junk params
 		// already fix the death-on-data-volume, so a lost ping through an awg
 		// tunnel is measurement noise, not a real drop. Trust the awg trace.
@@ -97,17 +99,17 @@ func main() {
 		if run.awg {
 			durability = 0
 		}
-		p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name), len(alive), errPal)
+		p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name), len(ips), errPal)
 		work := func(tn *tunnel, i int) {
 			defer p2.inc()
-			e := alive[i]
-			r := endpointResult{ip: e.ip, edge: e.trace}
-			if t, endpoint, ok, durable := tn.trace(ctx, e.ip, timeout, durability); ok {
+			ip := ips[i]
+			r := endpointResult{ip: ip}
+			if t, endpoint, ok, durable := tn.trace(ctx, ip, timeout, durability); ok {
 				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, durable
 			}
 			results[i] = r
 		}
-		if err := runTunnelPool(opts.tunnelParallel, run.awg, len(alive), work); err != nil {
+		if err := runTunnelPool(opts.tunnelParallel, run.awg, len(ips), work); err != nil {
 			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
 			os.Exit(1)
 		}
@@ -140,6 +142,11 @@ type phaseResult struct {
 // tunnelCandidates is how many live endpoints the fallback discovers before it
 // stops scanning and starts bringing up a registration tunnel.
 const tunnelCandidates = 20
+
+// fallbackDiscoveryWorkers is the TCP-probe concurrency for that fallback
+// endpoint discovery (discoverAlive). Only used when the API is unreachable
+// directly and no cached account exists.
+const fallbackDiscoveryWorkers = 50
 
 // obtainAccount registers a fresh WARP config, choosing how to reach the API:
 // via proxy if given, directly if reachable, otherwise through a WARP tunnel on
@@ -210,6 +217,72 @@ func discoverAlive(ctx context.Context, ips []netip.Addr, workers int, timeout t
 		mu.Unlock()
 	})
 	return found
+}
+
+// portProbeSample is how many pool IPs phase 1 tries before deciding a port is
+// blocked. A reachable network is confirmed on the first live endpoint; only a
+// fully blocked network pays the whole sample.
+const portProbeSample = 12
+
+// anyAWG reports whether any run uses AmneziaWG.
+func anyAWG(runs []protoRun) bool {
+	for _, r := range runs {
+		if r.awg {
+			return true
+		}
+	}
+	return false
+}
+
+// reachablePorts is phase 1: it finds which WARP ports a WireGuard handshake
+// reaches on this network. A completed handshake is enough - it proves the port
+// is open and basic connectivity exists. Whether data then survives is the
+// protocol's job (plain wg may die where AmneziaWG's obfuscation gets through),
+// decided per-endpoint in phase 2, so phase 1 stays a cheap handshake probe. It
+// walks a sample of pool IPs until one endpoint handshakes on any port - that
+// endpoint is reachable, so the ports it answers on are the ones the network
+// lets through and the ports it stays silent on are blocked (a live WARP
+// endpoint listens on all of warpPorts). Returns the reachable subset of
+// warpPorts in their original order, or empty if nothing got through.
+func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, sample int) ([]int, error) {
+	tn, err := newTunnel(awg)
+	if err != nil {
+		return nil, err
+	}
+	defer tn.Close()
+
+	open := make(map[int]bool)
+	for _, ip := range sampleAddrs(ips, sample) {
+		for _, port := range warpPorts {
+			if tn.handshake(ctx, fmt.Sprintf("%s:%d", ip, port), timeout) {
+				open[port] = true
+			}
+		}
+		if len(open) > 0 {
+			break // this endpoint is reachable; open now holds the network's ports
+		}
+	}
+
+	var ports []int
+	for _, port := range warpPorts {
+		if open[port] {
+			ports = append(ports, port)
+		}
+	}
+	return ports, nil
+}
+
+// sampleAddrs returns up to n random addresses from ips (all of them if n covers
+// the slice), so phase 1 spreads its probes rather than hitting one dead subnet.
+func sampleAddrs(ips []netip.Addr, n int) []netip.Addr {
+	if n <= 0 || n >= len(ips) {
+		return ips
+	}
+	out := make([]netip.Addr, n)
+	for i, j := range rand.Perm(len(ips))[:n] {
+		out[i] = ips[j]
+	}
+	return out
 }
 
 // registerViaTunnel brings up a tunnel on hardcoded keys, points it at the first

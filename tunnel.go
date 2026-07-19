@@ -86,18 +86,26 @@ func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration
 // (e.g. the registration requests) through t.tnet.
 func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Duration) bool {
 	for _, port := range warpPorts {
-		peer, err := peerUAPI(fmt.Sprintf("%s:%d", ip, port))
-		if err != nil {
-			continue
-		}
-		if err := t.dev.IpcSet(peer); err != nil {
-			continue
-		}
-		if waitHandshake(ctx, t.dev, timeout) {
+		if t.handshake(ctx, fmt.Sprintf("%s:%d", ip, port), timeout) {
 			return true
 		}
 	}
 	return false
+}
+
+// handshake points the peer at endpoint (ip:port) and reports whether a
+// WireGuard handshake completes. It is the only reliable reachability test for a
+// WARP UDP port: the endpoint stays silent to any packet without a valid
+// handshake, so there is no lighter (netcat-style) probe.
+func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Duration) bool {
+	peer, err := peerUAPI(endpoint)
+	if err != nil {
+		return false
+	}
+	if err := t.dev.IpcSet(peer); err != nil {
+		return false
+	}
+	return waitHandshake(ctx, t.dev, timeout)
 }
 
 // traceEndpoint brings the peer up and fetches the trace. When pings > 0 it then
