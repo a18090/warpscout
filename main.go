@@ -154,7 +154,8 @@ func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr
 		return registerWARP(ctx, direct)
 	}
 
-	fmt.Fprintln(os.Stderr, errPal.dim("API unreachable directly; registering through a WARP tunnel (pass -proxy to use a proxy instead)"))
+	fmt.Fprintf(os.Stderr, "\n%s\n\n", errPal.fail("API unreachable directly"))
+	fmt.Fprintln(os.Stderr, errPal.dim("Registering through a WARP tunnel (pass -proxy to use a proxy instead)"))
 	fmt.Fprintln(os.Stderr, errPal.dim("  discovering a live endpoint for the tunnel..."))
 	candidates := discoverAlive(ctx, ips, workers, timeout, tunnelCandidates)
 	if len(candidates) == 0 {
