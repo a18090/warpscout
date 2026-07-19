@@ -70,15 +70,55 @@ func writeFullReport(w io.Writer, results []endpointResult) {
 	}
 
 	fmt.Fprintf(w, "\n  %-22s %-10s %-10s %s\n", "ENDPOINT", "PHASE1", "PHASE2", "MATCH")
-	for _, r := range working {
-		match := "✓"
-		if !r.phasesMatch() {
-			match = "✗"
+	for _, base := range pools {
+		subnet := subnetEndpoints(working, base)
+		if len(subnet) == 0 {
+			continue
 		}
-		fmt.Fprintf(w, "  %-22s %-10s %-10s %s\n", r.endpoint, regionColo(r.edge), regionColo(r.exit), match)
+		fmt.Fprintf(w, "\n  ── %s0/24 ──\n", base)
+		for _, colo := range exitColos(subnet) {
+			fmt.Fprintf(w, "    %s\n", colo)
+			for _, r := range subnet {
+				if regionColo(r.exit) != colo {
+					continue
+				}
+				match := "✓"
+				if !r.phasesMatch() {
+					match = "✗"
+				}
+				fmt.Fprintf(w, "    %-22s %-10s %-10s %s\n", r.endpoint, regionColo(r.edge), regionColo(r.exit), match)
+			}
+		}
 	}
 
 	writeSubnetPicks(w, working)
+}
+
+// subnetEndpoints returns the working endpoints whose IP falls in the base /24.
+func subnetEndpoints(working []endpointResult, base string) []endpointResult {
+	var picks []endpointResult
+	for _, r := range working {
+		if strings.HasPrefix(r.ip.String(), base) {
+			picks = append(picks, r)
+		}
+	}
+	return picks
+}
+
+// exitColos returns the distinct phase-2 region/colo values in the group, sorted.
+func exitColos(picks []endpointResult) []string {
+	seen := make(map[string]struct{})
+	var colos []string
+	for _, r := range picks {
+		colo := regionColo(r.exit)
+		if _, ok := seen[colo]; ok {
+			continue
+		}
+		seen[colo] = struct{}{}
+		colos = append(colos, colo)
+	}
+	sort.Strings(colos)
+	return colos
 }
 
 // writeConsole prints a compact summary: unique colos and regions found, plus
@@ -118,12 +158,7 @@ func uniqueSorted(working []endpointResult, key func(endpointResult) string) str
 func writeSubnetPicks(w io.Writer, working []endpointResult) {
 	fmt.Fprintln(w, "\n  ── One random working endpoint per subnet ──")
 	for _, base := range pools {
-		var picks []endpointResult
-		for _, r := range working {
-			if strings.HasPrefix(r.ip.String(), base) {
-				picks = append(picks, r)
-			}
-		}
+		picks := subnetEndpoints(working, base)
 		subnet := base + "0/24"
 		if len(picks) == 0 {
 			fmt.Fprintf(w, "  %-18s %s\n", subnet, "(none)")
