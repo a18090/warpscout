@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"net/netip"
 	"os"
 	"sync"
@@ -24,6 +25,9 @@ func main() {
 	timeoutSec := flag.Int("t", 2, "per-request timeout in seconds")
 	proto := flag.String("proto", "wg", "protocol: wg (WireGuard) or awg (AmneziaWG)")
 	output := flag.String("o", "", "also write the report to this file")
+	proxy := flag.String("proxy", "", "http(s)/socks5 proxy URL for registration")
+	register := flag.Bool("register", false, "only register a fresh WARP account (save it and exit, no scanning)")
+	accountPath := flag.String("account", defaultAccount, "path to cached WARP account file")
 	flag.Parse()
 
 	awg, err := parseProto(*proto)
@@ -34,10 +38,45 @@ func main() {
 	timeout := time.Duration(*timeoutSec) * time.Second
 	ctx := context.Background()
 
+	// A cached account skips registration (and its API/tunnel dependency) entirely.
+	haveConfig := false
+	if !*register {
+		if a, err := loadAccount(*accountPath); err == nil {
+			applyAccount(a)
+			haveConfig = true
+			fmt.Fprintf(os.Stderr, "Using cached WARP account from %s\n", *accountPath)
+		}
+	}
+
 	ips := expandPools()
-	fmt.Fprintf(os.Stderr, "Phase 1: discovering edge colo for %d IPs...\n", len(ips))
+
+	// Registration first (if no cached account), so a user on a censored network
+	// hits the "pass -proxy" hint immediately instead of after a full phase 1.
+	// The tunnel fallback only needs a handful of live endpoints, discovered on
+	// demand rather than from the full scan.
+	if !haveConfig {
+		a, err := obtainAccount(ctx, awg, *proxy, ips, *parallel, timeout)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "registration failed: %v\n", err)
+			if *proxy == "" {
+				fmt.Fprintln(os.Stderr, "could not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>")
+			}
+			os.Exit(1)
+		}
+		if err := saveAccount(*accountPath, a); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not save account to %s: %v\n", *accountPath, err)
+		}
+		applyAccount(a)
+		fmt.Fprintf(os.Stderr, "Registered fresh WARP account -> %s\n", *accountPath)
+	}
+
+	// -register is a register-only mode: save the account and stop, no scanning.
+	if *register {
+		return
+	}
 
 	// Phase 1: keep only IPs whose edge answers, remembering its region/colo.
+	fmt.Fprintf(os.Stderr, "Phase 1: discovering edge colo for %d IPs...\n", len(ips))
 	type edge struct {
 		ip    netip.Addr
 		trace traceResult
@@ -81,6 +120,116 @@ func main() {
 			fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", *output, err)
 		}
 	}
+}
+
+// tunnelCandidates is how many live endpoints the fallback discovers before it
+// stops scanning and starts bringing up a registration tunnel.
+const tunnelCandidates = 20
+
+// obtainAccount registers a fresh WARP config, choosing how to reach the API:
+// via proxy if given, directly if reachable, otherwise through a WARP tunnel on
+// a handful of live endpoints discovered on demand.
+func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr, workers int, timeout time.Duration) (account, error) {
+	if proxy != "" {
+		c, err := proxyClient(proxy)
+		if err != nil {
+			return account{}, err
+		}
+		return registerWARP(ctx, c)
+	}
+
+	fmt.Fprintln(os.Stderr, "Checking Cloudflare API availability...")
+	direct := &http.Client{Timeout: registerTimeout}
+	if apiReachable(direct) {
+		return registerWARP(ctx, direct)
+	}
+
+	fmt.Fprintln(os.Stderr, "API unreachable directly; registering through a WARP tunnel (pass -proxy to use a proxy instead)")
+	fmt.Fprintln(os.Stderr, "  discovering a live endpoint for the tunnel...")
+	candidates := discoverAlive(ctx, ips, workers, timeout, tunnelCandidates)
+	if len(candidates) == 0 {
+		return account{}, fmt.Errorf("no live endpoints for tunnel fallback")
+	}
+
+	// Try the requested protocol first, then the other: plain WireGuard often
+	// completes a handshake but passes no data on censored networks, where
+	// AmneziaWG's junk gets through (see DESC.md). Registration itself is the
+	// data-path test, so fall through to the other proto if it fails.
+	var lastErr error
+	for _, p := range []bool{awg, !awg} {
+		fmt.Fprintf(os.Stderr, "  trying %s tunnel...\n", protoName(p))
+		a, err := registerViaTunnel(ctx, p, candidates, timeout)
+		if err == nil {
+			return a, nil
+		}
+		fmt.Fprintf(os.Stderr, "  %s tunnel failed: %v\n", protoName(p), err)
+		lastErr = err
+	}
+	return account{}, lastErr
+}
+
+// discoverAlive scans ips and returns up to want edge-responsive ones, stopping
+// early once enough are found (cheaper than a full phase 1 just to bootstrap the
+// registration tunnel).
+func discoverAlive(ctx context.Context, ips []netip.Addr, workers int, timeout time.Duration, want int) []netip.Addr {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var mu sync.Mutex
+	var found []netip.Addr
+	runPool(workers, len(ips), func(i int) {
+		if ctx.Err() != nil {
+			return
+		}
+		if _, ok := discoverColo(ctx, ips[i], timeout); !ok {
+			return
+		}
+		mu.Lock()
+		if len(found) < want {
+			found = append(found, ips[i])
+			if len(found) >= want {
+				cancel()
+			}
+		}
+		mu.Unlock()
+	})
+	return found
+}
+
+// registerViaTunnel brings up a tunnel on hardcoded keys, points it at the first
+// live endpoint that handshakes, and registers through it.
+func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration) (account, error) {
+	tn, err := newTunnel(awg)
+	if err != nil {
+		return account{}, err
+	}
+	defer tn.Close()
+
+	connectCtx, cancel := context.WithTimeout(ctx, tunnelDialTimout)
+	defer cancel()
+	connected := false
+	for _, ip := range ips {
+		if tn.connect(connectCtx, ip, timeout) {
+			connected = true
+			break
+		}
+	}
+	if !connected {
+		return account{}, fmt.Errorf("could not tunnel to any live endpoint")
+	}
+
+	client, err := tunnelClient(tn.tnet)
+	if err != nil {
+		return account{}, err
+	}
+	return registerWARP(ctx, client)
+}
+
+func protoName(awg bool) string {
+	if awg {
+		return "awg"
+	}
+	return "wg"
 }
 
 func parseProto(p string) (awg bool, err error) {

@@ -25,6 +25,7 @@ const cloudflareIP = "1.1.1.1:443"
 // to the worker count.
 type tunnel struct {
 	dev    *device.Device
+	tnet   *netstack.Net
 	client *http.Client
 }
 
@@ -59,7 +60,7 @@ func newTunnel(awg bool) (*tunnel, error) {
 			return tnet.DialContext(ctx, "tcp", cloudflareIP)
 		},
 	}
-	return &tunnel{dev: dev, client: &http.Client{Transport: transport}}, nil
+	return &tunnel{dev: dev, tnet: tnet, client: &http.Client{Transport: transport}}, nil
 }
 
 func (t *tunnel) Close() { t.dev.Close() }
@@ -75,6 +76,25 @@ func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration
 		}
 	}
 	return traceResult{}, endpoint, false
+}
+
+// connect points the tunnel at ip (first candidate port that completes a
+// handshake) without fetching anything, so the caller can send its own traffic
+// (e.g. the registration requests) through t.tnet.
+func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Duration) bool {
+	for _, port := range warpPorts {
+		peer, err := peerUAPI(fmt.Sprintf("%s:%d", ip, port))
+		if err != nil {
+			continue
+		}
+		if err := t.dev.IpcSet(peer); err != nil {
+			continue
+		}
+		if waitHandshake(ctx, t.dev, timeout) {
+			return true
+		}
+	}
+	return false
 }
 
 func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration) (traceResult, bool) {

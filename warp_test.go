@@ -1,8 +1,11 @@
 package main
 
 import (
+	"encoding/base64"
 	"strings"
 	"testing"
+
+	"golang.org/x/crypto/curve25519"
 )
 
 func TestBaseUAPI(t *testing.T) {
@@ -37,6 +40,44 @@ func TestPeerUAPI(t *testing.T) {
 		if !strings.Contains(peer, want) {
 			t.Errorf("missing %q in peer config", want)
 		}
+	}
+}
+
+func TestGenerateKeypair(t *testing.T) {
+	privB64, pubB64, err := generateKeypair()
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, err := base64.StdEncoding.DecodeString(privB64)
+	if err != nil || len(priv) != 32 {
+		t.Fatalf("bad private key: %v (len %d)", err, len(priv))
+	}
+	// Clamp bits must be set (RFC 7748 / wg key format).
+	if priv[0]&7 != 0 || priv[31]&128 != 0 || priv[31]&64 == 0 {
+		t.Error("private key not clamped")
+	}
+	want, err := curve25519.X25519(priv, curve25519.Basepoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base64.StdEncoding.EncodeToString(want) != pubB64 {
+		t.Error("public key does not match private key")
+	}
+}
+
+func TestParseRegResp(t *testing.T) {
+	body := []byte(`{"id":"dev123","token":"tok456","config":{` +
+		`"interface":{"addresses":{"v4":"172.16.0.5/32"}},` +
+		`"peers":[{"public_key":"PEERPUBKEY"}]}}`)
+	a, id, token, err := parseRegResp(body, "MYPRIVKEY")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != "dev123" || token != "tok456" {
+		t.Errorf("id/token = %q/%q", id, token)
+	}
+	if a.PrivateKey != "MYPRIVKEY" || a.PeerPublicKey != "PEERPUBKEY" || a.Address != "172.16.0.5" {
+		t.Errorf("account = %+v", a)
 	}
 }
 

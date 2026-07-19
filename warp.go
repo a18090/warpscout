@@ -7,13 +7,18 @@ import (
 	"strings"
 )
 
-// Hardcoded WARP config (see DESC.md). Registration/wgcf comes later.
-const (
+// WARP config. These are hardcoded fallbacks (see DESC.md); registration
+// (register.go) overwrites them in place with a freshly registered config
+// before phase 2, so they are vars, not consts.
+var (
 	warpPrivateKey = "4OnO86dDLpqJ2U10ODwX3tarx6xlRGLfkmbSBtMgaHg="
 	warpPublicKey  = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
 	warpAddress    = "172.16.0.2"
-	tunnelMTU      = 1280
-	keepalive      = 25
+)
+
+const (
+	tunnelMTU = 1280
+	keepalive = 25
 )
 
 // AmneziaWG junk parameters (see DESC.md). Empty for plain WireGuard.
