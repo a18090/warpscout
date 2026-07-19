@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"net/http"
 	"net/netip"
@@ -12,47 +11,31 @@ import (
 )
 
 func main() {
-	parallel := flag.Int("j", 50, "phase-1 (discovery) parallel workers")
-	// ponytail: single shared WARP key => WireGuard keeps one session per key,
-	// so parallel tunnels clobber each other server-side. Keep phase-2 low until
-	// per-run key registration (wgcf) lands, then raise the default.
-	tunnelParallel := flag.Int("jt", 4, "phase-2 (tunnel) parallel workers")
-	// Real WARP handshakes complete in ~100-250ms; the timeout only bounds how
-	// long a dead endpoint (answers HTTPS in phase 1 but no tunnel) stalls a
-	// worker. 2s keeps a wide margin over real latency while cutting that stall.
-	timeoutSec := flag.Int("t", 2, "per-request timeout in seconds")
-	proto := flag.String("proto", "wg", "protocol: wg (WireGuard) or awg (AmneziaWG)")
-	output := flag.String("o", "", "file for the full per-endpoint report (default warpscout-report-<timestamp>.txt)")
-	proxy := flag.String("proxy", "", "http(s)/socks5 proxy URL for registration")
-	register := flag.Bool("register", false, "only register a fresh WARP account (save it and exit, no scanning)")
-	accountPath := flag.String("account", defaultAccount, "path to cached WARP account file")
-	perSubnet := flag.Int("n", 10, "addresses to sample per /24 subnet")
-	full := flag.Bool("full", false, "scan all 256 addresses per /24 (overrides -n)")
-	flag.Parse()
+	opts := parseFlags()
 
 	errPal = palette{enabled: colorEnabled(os.Stderr)}
 	outPal := palette{enabled: colorEnabled(os.Stdout)}
 
-	awg, err := parseProto(*proto)
+	awg, err := parseProto(opts.proto)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
 		os.Exit(1)
 	}
-	timeout := time.Duration(*timeoutSec) * time.Second
+	timeout := time.Duration(opts.timeoutSec) * time.Second
 	ctx := context.Background()
 
 	// A cached account skips registration (and its API/tunnel dependency) entirely.
 	haveConfig := false
-	if !*register {
-		if a, err := loadAccount(*accountPath); err == nil {
+	if !opts.register {
+		if a, err := loadAccount(opts.accountPath); err == nil {
 			applyAccount(a)
 			haveConfig = true
-			fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", *accountPath)))
+			fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", opts.accountPath)))
 		}
 	}
 
-	sample := *perSubnet
-	if *full {
+	sample := opts.perSubnet
+	if opts.full {
 		sample = 0 // 0 => expandPools scans the whole /24
 	}
 	ips := expandPools(sample)
@@ -62,23 +45,23 @@ func main() {
 	// The tunnel fallback only needs a handful of live endpoints, discovered on
 	// demand rather than from the full scan.
 	if !haveConfig {
-		a, err := obtainAccount(ctx, awg, *proxy, ips, *parallel, timeout)
+		a, err := obtainAccount(ctx, awg, opts.proxy, ips, opts.parallel, timeout)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("registration failed: %v", err)))
-			if *proxy == "" {
+			if opts.proxy == "" {
 				fmt.Fprintln(os.Stderr, errPal.fail("could not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>"))
 			}
 			os.Exit(1)
 		}
-		if err := saveAccount(*accountPath, a); err != nil {
-			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("warning: could not save account to %s: %v", *accountPath, err)))
+		if err := saveAccount(opts.accountPath, a); err != nil {
+			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("warning: could not save account to %s: %v", opts.accountPath, err)))
 		}
 		applyAccount(a)
-		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", *accountPath)))
+		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", opts.accountPath)))
 	}
 
 	// -register is a register-only mode: save the account and stop, no scanning.
-	if *register {
+	if opts.register {
 		return
 	}
 
@@ -90,7 +73,7 @@ func main() {
 	var alive []edge
 	var mu sync.Mutex
 	p1 := newProgress("Phase 1: discovering edge colo", len(ips), errPal)
-	runPool(*parallel, len(ips), func(i int) {
+	runPool(opts.parallel, len(ips), func(i int) {
 		defer p1.inc()
 		if t, ok := discoverColo(ctx, ips[i], timeout); ok {
 			mu.Lock()
@@ -104,7 +87,7 @@ func main() {
 	// many IPs, reading the exit colo. Creating one tunnel per IP leaks gvisor
 	// stacks and OOMs (see tunnel.go), so live stacks are bounded to the pool.
 	results := make([]endpointResult, len(alive))
-	p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", *proto), len(alive), errPal)
+	p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", opts.proto), len(alive), errPal)
 	work := func(tn *tunnel, i int) {
 		defer p2.inc()
 		e := alive[i]
@@ -114,14 +97,14 @@ func main() {
 		}
 		results[i] = r
 	}
-	if err := runTunnelPool(*tunnelParallel, awg, len(alive), work); err != nil {
+	if err := runTunnelPool(opts.tunnelParallel, awg, len(alive), work); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
 		os.Exit(1)
 	}
 	p2.stop(errPal.ok("done"))
 
 	writeConsole(os.Stdout, results, outPal)
-	reportPath := *output
+	reportPath := opts.output
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
 	}
