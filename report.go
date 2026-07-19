@@ -161,7 +161,7 @@ func writeSubnetPicks(w io.Writer, working []endpointResult) {
 		picks := subnetEndpoints(working, base)
 		subnet := base + "0/24"
 		if len(picks) == 0 {
-			fmt.Fprintf(w, "  %-18s %s\n", subnet, "(none)")
+			fmt.Fprintf(w, "  %-18s %s\n", subnet, "no working endpoints")
 			continue
 		}
 		r := picks[rand.Intn(len(picks))]
