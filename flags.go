@@ -9,7 +9,6 @@ import (
 
 // options holds every parsed command-line value.
 type options struct {
-	parallel       int
 	tunnelParallel int
 	timeoutSec     int
 	durability     int
@@ -39,7 +38,6 @@ type flagGroup struct {
 
 var flagGroups = []flagGroup{
 	{"Scan tuning", []flagSpec{
-		{"j", "jobs", "N", "phase 1 discovery workers"},
 		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
 		{"t", "timeout", "SEC", "per-request timeout"},
 		{"d", "durability", "N", "durability probe pings per working tunnel (wg only, ignored for awg); 0 disables"},
@@ -76,14 +74,13 @@ func boolFlag(p *bool, short, long string) {
 
 func parseFlags() options {
 	var o options
-	intFlag(&o.parallel, 50, "j", "jobs")
 	// ponytail: single shared WARP key => WireGuard keeps one session per key,
 	// so parallel tunnels clobber each other server-side. Keep phase-2 low until
 	// per-run key registration (wgcf) lands, then raise the default.
 	intFlag(&o.tunnelParallel, 4, "jt", "tunnel-jobs")
 	// Real WARP handshakes complete in ~100-250ms; the timeout only bounds how
-	// long a dead endpoint (answers HTTPS in phase 1 but no tunnel) stalls a
-	// worker. 2s keeps a wide margin over real latency while cutting that stall.
+	// long a dead endpoint stalls a worker waiting for a handshake that never
+	// comes. 2s keeps a wide margin over real latency while cutting that stall.
 	intFlag(&o.timeoutSec, 2, "t", "timeout")
 	// A working tunnel is pinged this many times: TSPU passes a WG handshake and
 	// a few packets, then drops the peer, so a single fetch false-positives. Any
@@ -109,9 +106,9 @@ func usage() {
 
 	fmt.Fprintln(w, pal.title("warpscout")+" - scan Cloudflare WARP endpoint pools for working endpoints")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Two-phase scan: phase 1 finds responsive Cloudflare edges, phase 2 verifies")
-	fmt.Fprintln(w, "the real exit colo through a WARP tunnel. Working endpoints are reported")
-	fmt.Fprintln(w, "grouped per /24 subnet.")
+	fmt.Fprintln(w, "Two-phase scan: phase 1 finds which WARP ports get through this network,")
+	fmt.Fprintln(w, "phase 2 verifies each endpoint's real exit colo through a WARP tunnel.")
+	fmt.Fprintln(w, "Working endpoints are reported grouped per /24 subnet.")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, pal.title("Usage:"))
 	fmt.Fprintf(w, "  %s [options]\n", pal.accent("warpscout"))
