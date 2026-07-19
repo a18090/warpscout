@@ -18,57 +18,85 @@ import (
 // in-tunnel DNS. TLS SNI stays cloudflare.com so the certificate verifies.
 const cloudflareIP = "1.1.1.1:443"
 
-// verifyEndpoint brings up a userspace tunnel to ip (trying each candidate port
-// in order), confirms the handshake by fetching /cdn-cgi/trace through it, and
-// returns the real exit colo. endpoint is the ip:port that worked.
-func verifyEndpoint(ctx context.Context, ip netip.Addr, awg bool, timeout time.Duration) (t traceResult, endpoint string, ok bool) {
-	for _, port := range warpPorts {
-		endpoint = fmt.Sprintf("%s:%d", ip, port)
-		if t, ok = tunnelTrace(ctx, endpoint, awg, timeout); ok {
-			return t, endpoint, true
-		}
-	}
-	return traceResult{}, endpoint, false
+// tunnel is a persistent userspace WireGuard device reused across many IPs. The
+// gvisor stack behind netstack.CreateNetTUN is never freed by the library
+// (netTun.Close only RemoveNIC), so creating one per IP leaks and OOMs. Reusing
+// a fixed pool of tunnels and swapping only the peer endpoint bounds live stacks
+// to the worker count.
+type tunnel struct {
+	dev    *device.Device
+	client *http.Client
 }
 
-func tunnelTrace(ctx context.Context, endpoint string, awg bool, timeout time.Duration) (traceResult, bool) {
-	uapi, err := buildUAPI(endpoint, awg)
+// newTunnel brings up one device with the interface config applied once.
+func newTunnel(awg bool) (*tunnel, error) {
+	base, err := baseUAPI(awg)
 	if err != nil {
-		return traceResult{}, false
+		return nil, err
 	}
 
 	localAddr := netip.MustParseAddr(warpAddress)
 	tunDev, tnet, err := netstack.CreateNetTUN([]netip.Addr{localAddr}, nil, tunnelMTU)
 	if err != nil {
-		return traceResult{}, false
+		return nil, err
 	}
 	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
-	defer dev.Close()
 
-	if err := dev.IpcSet(uapi); err != nil {
-		return traceResult{}, false
+	if err := dev.IpcSet(base); err != nil {
+		dev.Close()
+		return nil, err
 	}
 	if err := dev.Up(); err != nil {
-		return traceResult{}, false
-	}
-
-	// persistent_keepalive triggers a handshake initiation on Up. Wait for it to
-	// complete before sending traffic, otherwise the first TCP SYN is dropped by
-	// the not-yet-established peer and netstack stalls past the timeout.
-	if !waitHandshake(ctx, dev, timeout) {
-		return traceResult{}, false
+		dev.Close()
+		return nil, err
 	}
 
 	transport := &http.Transport{
+		// Fresh connection each request so no TCP state from a previous endpoint
+		// carries over after the peer is swapped.
+		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			return tnet.DialContext(ctx, "tcp", cloudflareIP)
 		},
 	}
-	client := &http.Client{Transport: transport, Timeout: timeout}
+	return &tunnel{dev: dev, client: &http.Client{Transport: transport}}, nil
+}
+
+func (t *tunnel) Close() { t.dev.Close() }
+
+// trace points the tunnel at ip (trying each candidate port in order), confirms
+// the handshake by fetching /cdn-cgi/trace through it, and returns the real exit
+// colo. endpoint is the ip:port that worked.
+func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration) (tr traceResult, endpoint string, ok bool) {
+	for _, port := range warpPorts {
+		endpoint = fmt.Sprintf("%s:%d", ip, port)
+		if tr, ok = t.traceEndpoint(ctx, endpoint, timeout); ok {
+			return tr, endpoint, true
+		}
+	}
+	return traceResult{}, endpoint, false
+}
+
+func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration) (traceResult, bool) {
+	peer, err := peerUAPI(endpoint)
+	if err != nil {
+		return traceResult{}, false
+	}
+	if err := t.dev.IpcSet(peer); err != nil {
+		return traceResult{}, false
+	}
+
+	// persistent_keepalive triggers a handshake initiation. Wait for it to
+	// complete before sending traffic, otherwise the first TCP SYN is dropped by
+	// the not-yet-established peer and netstack stalls past the timeout.
+	if !waitHandshake(ctx, t.dev, timeout) {
+		return traceResult{}, false
+	}
 
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	body, ok := fetchTrace(reqCtx, client, traceURL)
+	t.client.Timeout = timeout
+	body, ok := fetchTrace(reqCtx, t.client, traceURL)
 	if !ok {
 		return traceResult{}, false
 	}

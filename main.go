@@ -50,20 +50,26 @@ func main() {
 	})
 	fmt.Fprintf(os.Stderr, "Phase 1: %d responsive IPs\n", len(alive))
 
-	// Phase 2: bring up a tunnel to each responsive IP and read the exit colo.
+	// Phase 2: bring up a small pool of persistent tunnels and reuse each across
+	// many IPs, reading the exit colo. Creating one tunnel per IP leaks gvisor
+	// stacks and OOMs (see tunnel.go), so live stacks are bounded to the pool.
 	fmt.Fprintf(os.Stderr, "Phase 2: verifying tunnels (proto=%s)...\n", *proto)
 	results := make([]endpointResult, len(alive))
 	var done int64
-	runPool(*tunnelParallel, len(alive), func(i int) {
+	work := func(tn *tunnel, i int) {
 		e := alive[i]
 		r := endpointResult{ip: e.ip, edge: e.trace}
-		if t, endpoint, ok := verifyEndpoint(ctx, e.ip, awg, timeout); ok {
+		if t, endpoint, ok := tn.trace(ctx, e.ip, timeout); ok {
 			r.exit, r.endpoint, r.ok = t, endpoint, true
 		}
 		results[i] = r
 		n := atomic.AddInt64(&done, 1)
 		fmt.Fprintf(os.Stderr, "\rPhase 2: %d/%d", n, len(alive))
-	})
+	}
+	if err := runTunnelPool(*tunnelParallel, awg, len(alive), work); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	fmt.Fprintln(os.Stderr)
 
 	writeReport(os.Stdout, results)
@@ -102,6 +108,50 @@ func runPool(workers, n int, fn func(i int)) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+// runTunnelPool creates up to workers persistent tunnels and dispatches indices
+// 0..n-1 across them, each worker reusing its tunnel for every job it pulls.
+func runTunnelPool(workers int, awg bool, n int, fn func(tn *tunnel, i int)) error {
+	if workers < 1 {
+		workers = 1
+	}
+
+	var tunnels []*tunnel
+	for len(tunnels) < workers {
+		tn, err := newTunnel(awg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tunnel setup failed: %v\n", err)
+			break
+		}
+		tunnels = append(tunnels, tn)
+	}
+	if len(tunnels) == 0 {
+		return fmt.Errorf("no tunnels could be created")
+	}
+	defer func() {
+		for _, tn := range tunnels {
+			tn.Close()
+		}
+	}()
+
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for _, tn := range tunnels {
+		wg.Add(1)
+		go func(tn *tunnel) {
+			defer wg.Done()
+			for i := range jobs {
+				fn(tn, i)
+			}
+		}(tn)
+	}
+	for i := 0; i < n; i++ {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return nil
 }
 
 func writeToFile(path string, results []endpointResult) error {

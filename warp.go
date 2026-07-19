@@ -36,17 +36,13 @@ func base64ToHex(b64 string) (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-// buildUAPI produces the IpcSet configuration string for one endpoint.
-// awg=true adds the junk parameters that turn the plain WireGuard handshake
-// into an AmneziaWG one.
-func buildUAPI(endpoint string, awg bool) (string, error) {
+// baseUAPI produces the interface-only IpcSet string, applied once when a tunnel
+// is created. awg=true adds the junk parameters that turn the plain WireGuard
+// handshake into an AmneziaWG one.
+func baseUAPI(awg bool) (string, error) {
 	privHex, err := base64ToHex(warpPrivateKey)
 	if err != nil {
 		return "", fmt.Errorf("private key: %w", err)
-	}
-	pubHex, err := base64ToHex(warpPublicKey)
-	if err != nil {
-		return "", fmt.Errorf("public key: %w", err)
 	}
 
 	var b strings.Builder
@@ -57,6 +53,20 @@ func buildUAPI(endpoint string, awg bool) (string, error) {
 		fmt.Fprintf(&b, "jmax=%d\n", awgJmax)
 		fmt.Fprintf(&b, "i1=%s\n", awgI1)
 	}
+	return b.String(), nil
+}
+
+// peerUAPI produces the per-endpoint IpcSet delta. replace_peers clears the
+// previous peer and its handshake state so a fresh handshake initiates to the
+// new endpoint; the interface's private_key persists across the delta.
+func peerUAPI(endpoint string) (string, error) {
+	pubHex, err := base64ToHex(warpPublicKey)
+	if err != nil {
+		return "", fmt.Errorf("public key: %w", err)
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "replace_peers=true\n")
 	fmt.Fprintf(&b, "public_key=%s\n", pubHex)
 	fmt.Fprintf(&b, "endpoint=%s\n", endpoint)
 	fmt.Fprintf(&b, "allowed_ip=0.0.0.0/0\n")
