@@ -8,7 +8,6 @@ import (
 	"net/netip"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -31,9 +30,12 @@ func main() {
 	full := flag.Bool("full", false, "scan all 256 addresses per /24 (overrides -n)")
 	flag.Parse()
 
+	errPal = palette{enabled: colorEnabled(os.Stderr)}
+	outPal := palette{enabled: colorEnabled(os.Stdout)}
+
 	awg, err := parseProto(*proto)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
 		os.Exit(1)
 	}
 	timeout := time.Duration(*timeoutSec) * time.Second
@@ -45,7 +47,7 @@ func main() {
 		if a, err := loadAccount(*accountPath); err == nil {
 			applyAccount(a)
 			haveConfig = true
-			fmt.Fprintf(os.Stderr, "Using cached WARP account from %s\n", *accountPath)
+			fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", *accountPath)))
 		}
 	}
 
@@ -62,17 +64,17 @@ func main() {
 	if !haveConfig {
 		a, err := obtainAccount(ctx, awg, *proxy, ips, *parallel, timeout)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "registration failed: %v\n", err)
+			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("registration failed: %v", err)))
 			if *proxy == "" {
-				fmt.Fprintln(os.Stderr, "could not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>")
+				fmt.Fprintln(os.Stderr, errPal.fail("could not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>"))
 			}
 			os.Exit(1)
 		}
 		if err := saveAccount(*accountPath, a); err != nil {
-			fmt.Fprintf(os.Stderr, "warning: could not save account to %s: %v\n", *accountPath, err)
+			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("warning: could not save account to %s: %v", *accountPath, err)))
 		}
 		applyAccount(a)
-		fmt.Fprintf(os.Stderr, "Registered fresh WARP account -> %s\n", *accountPath)
+		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", *accountPath)))
 	}
 
 	// -register is a register-only mode: save the account and stop, no scanning.
@@ -81,53 +83,52 @@ func main() {
 	}
 
 	// Phase 1: keep only IPs whose edge answers, remembering its region/colo.
-	fmt.Fprintf(os.Stderr, "Phase 1: discovering edge colo for %d IPs...\n", len(ips))
 	type edge struct {
 		ip    netip.Addr
 		trace traceResult
 	}
 	var alive []edge
 	var mu sync.Mutex
+	p1 := newProgress("Phase 1: discovering edge colo", len(ips), errPal)
 	runPool(*parallel, len(ips), func(i int) {
+		defer p1.inc()
 		if t, ok := discoverColo(ctx, ips[i], timeout); ok {
 			mu.Lock()
 			alive = append(alive, edge{ips[i], t})
 			mu.Unlock()
 		}
 	})
-	fmt.Fprintf(os.Stderr, "Phase 1: %d responsive IPs\n", len(alive))
+	p1.stop(errPal.ok(fmt.Sprintf("%d responsive IPs", len(alive))))
 
 	// Phase 2: bring up a small pool of persistent tunnels and reuse each across
 	// many IPs, reading the exit colo. Creating one tunnel per IP leaks gvisor
 	// stacks and OOMs (see tunnel.go), so live stacks are bounded to the pool.
-	fmt.Fprintf(os.Stderr, "Phase 2: verifying tunnels (proto=%s)...\n", *proto)
 	results := make([]endpointResult, len(alive))
-	var done int64
+	p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", *proto), len(alive), errPal)
 	work := func(tn *tunnel, i int) {
+		defer p2.inc()
 		e := alive[i]
 		r := endpointResult{ip: e.ip, edge: e.trace}
 		if t, endpoint, ok := tn.trace(ctx, e.ip, timeout); ok {
 			r.exit, r.endpoint, r.ok = t, endpoint, true
 		}
 		results[i] = r
-		n := atomic.AddInt64(&done, 1)
-		fmt.Fprintf(os.Stderr, "\rPhase 2: %d/%d", n, len(alive))
 	}
 	if err := runTunnelPool(*tunnelParallel, awg, len(alive), work); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
 		os.Exit(1)
 	}
-	fmt.Fprintln(os.Stderr)
+	p2.stop(errPal.ok("done"))
 
-	writeConsole(os.Stdout, results)
+	writeConsole(os.Stdout, results, outPal)
 	reportPath := *output
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
 	}
 	if err := writeToFile(reportPath, results); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to write %s: %v\n", reportPath, err)
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", reportPath, err)))
 	} else {
-		fmt.Fprintf(os.Stderr, "\nFull report written to %s\n", reportPath)
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
 	}
 }
 
@@ -147,14 +148,14 @@ func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr
 		return registerWARP(ctx, c)
 	}
 
-	fmt.Fprintln(os.Stderr, "Checking Cloudflare API availability...")
+	fmt.Fprintln(os.Stderr, errPal.dim("Checking Cloudflare API availability..."))
 	direct := &http.Client{Timeout: registerTimeout}
 	if apiReachable(direct) {
 		return registerWARP(ctx, direct)
 	}
 
-	fmt.Fprintln(os.Stderr, "API unreachable directly; registering through a WARP tunnel (pass -proxy to use a proxy instead)")
-	fmt.Fprintln(os.Stderr, "  discovering a live endpoint for the tunnel...")
+	fmt.Fprintln(os.Stderr, errPal.dim("API unreachable directly; registering through a WARP tunnel (pass -proxy to use a proxy instead)"))
+	fmt.Fprintln(os.Stderr, errPal.dim("  discovering a live endpoint for the tunnel..."))
 	candidates := discoverAlive(ctx, ips, workers, timeout, tunnelCandidates)
 	if len(candidates) == 0 {
 		return account{}, fmt.Errorf("no live endpoints for tunnel fallback")
@@ -166,12 +167,12 @@ func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr
 	// data-path test, so fall through to the other proto if it fails.
 	var lastErr error
 	for _, p := range []bool{awg, !awg} {
-		fmt.Fprintf(os.Stderr, "  trying %s tunnel...\n", protoName(p))
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("  trying %s tunnel...", protoName(p))))
 		a, err := registerViaTunnel(ctx, p, candidates, timeout)
 		if err == nil {
 			return a, nil
 		}
-		fmt.Fprintf(os.Stderr, "  %s tunnel failed: %v\n", protoName(p), err)
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("  %s tunnel failed: %v", protoName(p), err)))
 		lastErr = err
 	}
 	return account{}, lastErr

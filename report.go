@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"net/netip"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -121,20 +122,73 @@ func exitColos(picks []endpointResult) []string {
 	return colos
 }
 
-// writeConsole prints a compact summary: unique colos and regions found, plus
-// one working endpoint per subnet. The full per-endpoint table goes to the file.
-func writeConsole(w io.Writer, results []endpointResult) {
+// writeConsole prints a colored, framed summary to the terminal: a banner with
+// the working/probed counts, the unique colos and regions found, and a boxed
+// table of one working endpoint per subnet. The full per-endpoint report goes
+// to the file (writeFullReport, plain text).
+func writeConsole(w io.Writer, results []endpointResult, pal palette) {
 	working := workingSorted(results)
-	writeHeader(w, len(working), len(results))
 	if len(working) == 0 {
-		fmt.Fprintln(w, "\nNo working endpoints found.")
+		fmt.Fprintln(w, pal.fail("No working endpoints found."))
 		return
 	}
 
-	fmt.Fprintf(w, "\n  Colo:    %s\n", uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }))
-	fmt.Fprintf(w, "  Regions: %s\n", uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }))
+	writeBanner(w, pal, len(working), len(results))
+	fmt.Fprintf(w, "  Colo:     %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo })))
+	fmt.Fprintf(w, "  Regions:  %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc })))
+	writePicksTable(w, pal, working)
+}
 
-	writeSubnetPicks(w, working)
+const bannerWidth = 52
+
+// writeBanner prints a rounded box with the working/probed headline.
+func writeBanner(w io.Writer, pal palette, working, probed int) {
+	label := fmt.Sprintf("  WARPSCOUT   %d working / %d probed", working, probed)
+	pad := bannerWidth - len([]rune(label))
+	if pad < 0 {
+		pad = 0
+	}
+	body := "  " + pal.title("WARPSCOUT") + "   " + pal.ok(strconv.Itoa(working)) + " working" +
+		pal.dim(" / ") + strconv.Itoa(probed) + " probed"
+	fmt.Fprintln(w, pal.dim("╭"+strings.Repeat("─", bannerWidth)+"╮"))
+	fmt.Fprintf(w, "%s%s%s%s\n", pal.dim("│"), body, strings.Repeat(" ", pad), pal.dim("│"))
+	fmt.Fprintln(w, pal.dim("╰"+strings.Repeat("─", bannerWidth)+"╯"))
+}
+
+// Column widths for the subnet-picks table (excluding the 1-space cell padding).
+const (
+	colSubnet   = 16
+	colEndpoint = 22
+	colExit     = 8
+)
+
+// writePicksTable prints a boxed table of one random working endpoint per subnet.
+func writePicksTable(w io.Writer, pal palette, working []endpointResult) {
+	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
+	border := func(l, m, r string) string {
+		return l + strings.Repeat("─", colSubnet+2) + m + strings.Repeat("─", colEndpoint+2) + m +
+			strings.Repeat("─", colExit+2) + r
+	}
+	row := func(a, b, c string) string {
+		bar := pal.dim("│")
+		return fmt.Sprintf("  %s %s %s %s %s %s %s", bar, a, bar, b, bar, c, bar)
+	}
+
+	fmt.Fprintln(w, "\n  "+pal.title("Working endpoint per subnet"))
+	fmt.Fprintln(w, "  "+pal.dim(border("┌", "┬", "┐")))
+	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("EXIT", colExit))))
+	fmt.Fprintln(w, "  "+pal.dim(border("├", "┼", "┤")))
+	for _, base := range pools {
+		picks := subnetEndpoints(working, base)
+		subnet := pad(base+"0/24", colSubnet)
+		if len(picks) == 0 {
+			fmt.Fprintln(w, row(subnet, pal.fail(pad("no working endpoints", colEndpoint)), pad("", colExit)))
+			continue
+		}
+		r := picks[rand.Intn(len(picks))]
+		fmt.Fprintln(w, row(subnet, pal.addr(pad(r.endpoint, colEndpoint)), pal.accent(pad(regionColo(r.exit), colExit))))
+	}
+	fmt.Fprintln(w, "  "+pal.dim(border("└", "┴", "┘")))
 }
 
 // uniqueSorted collects the non-empty key(r) values, sorted and space-joined.

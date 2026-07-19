@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/base64"
 	"net/netip"
 	"strings"
@@ -8,6 +9,31 @@ import (
 
 	"golang.org/x/crypto/curve25519"
 )
+
+func TestWriteConsolePalette(t *testing.T) {
+	res := []endpointResult{{
+		ip:       netip.MustParseAddr("8.47.69.86"),
+		edge:     traceResult{loc: "RU", colo: "DME"},
+		exit:     traceResult{loc: "RU", colo: "DME"},
+		endpoint: "8.47.69.86:2408",
+		ok:       true,
+	}}
+
+	var plain bytes.Buffer
+	writeConsole(&plain, res, palette{enabled: false})
+	if strings.Contains(plain.String(), "\033") {
+		t.Error("plain (non-TTY) console output must not contain ANSI escapes")
+	}
+	if !strings.Contains(plain.String(), "8.47.69.86:2408") {
+		t.Error("console output missing the working endpoint")
+	}
+
+	var colored bytes.Buffer
+	writeConsole(&colored, res, palette{enabled: true})
+	if !strings.Contains(colored.String(), "\033") {
+		t.Error("colored console output should contain ANSI escapes")
+	}
+}
 
 func TestBaseUAPI(t *testing.T) {
 	wg, err := baseUAPI(false)
