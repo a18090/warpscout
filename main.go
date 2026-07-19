@@ -32,6 +32,7 @@ func main() {
 			applyAccount(a)
 			haveConfig = true
 			fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", opts.accountPath)))
+			fmt.Fprintln(os.Stderr)
 		}
 	}
 
