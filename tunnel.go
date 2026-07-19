@@ -115,7 +115,7 @@ func waitHandshake(ctx context.Context, dev *device.Device, timeout time.Duratio
 		if err == nil && handshakeDone(conf) {
 			return true
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(20 * time.Millisecond)
 	}
 	return false
 }

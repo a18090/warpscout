@@ -18,7 +18,10 @@ func main() {
 	// so parallel tunnels clobber each other server-side. Keep phase-2 low until
 	// per-run key registration (wgcf) lands, then raise the default.
 	tunnelParallel := flag.Int("jt", 4, "phase-2 (tunnel) parallel workers")
-	timeoutSec := flag.Int("t", 5, "per-request timeout in seconds")
+	// Real WARP handshakes complete in ~100-250ms; the timeout only bounds how
+	// long a dead endpoint (answers HTTPS in phase 1 but no tunnel) stalls a
+	// worker. 2s keeps a wide margin over real latency while cutting that stall.
+	timeoutSec := flag.Int("t", 2, "per-request timeout in seconds")
 	proto := flag.String("proto", "wg", "protocol: wg (WireGuard) or awg (AmneziaWG)")
 	output := flag.String("o", "", "also write the report to this file")
 	flag.Parse()
