@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/base64"
+	"net/netip"
 	"strings"
 	"testing"
 
@@ -78,6 +79,22 @@ func TestParseRegResp(t *testing.T) {
 	}
 	if a.PrivateKey != "MYPRIVKEY" || a.PeerPublicKey != "PEERPUBKEY" || a.Address != "172.16.0.5" {
 		t.Errorf("account = %+v", a)
+	}
+}
+
+func TestExpandPools(t *testing.T) {
+	if n := len(expandPools(0)); n != len(pools)*256 {
+		t.Errorf("full scan = %d IPs, want %d", n, len(pools)*256)
+	}
+	if n := len(expandPools(8)); n != len(pools)*8 {
+		t.Errorf("partial scan = %d IPs, want %d", n, len(pools)*8)
+	}
+	seen := map[netip.Addr]bool{}
+	for _, ip := range expandPools(8) {
+		if seen[ip] {
+			t.Errorf("duplicate host %v in a subnet", ip)
+		}
+		seen[ip] = true
 	}
 }
 

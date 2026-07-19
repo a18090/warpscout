@@ -1,6 +1,7 @@
 package main
 
 import (
+	"math/rand"
 	"net/netip"
 	"strconv"
 )
@@ -17,11 +18,26 @@ var pools = []string{
 	"188.114.99.",
 }
 
-// expandPools returns every /24 host address across all pools.
-func expandPools() []netip.Addr {
-	ips := make([]netip.Addr, 0, len(pools)*256)
+// expandPools returns host addresses across all pools. With perSubnet <= 0 or
+// >= 256 it returns every /24 host (full scan); otherwise it returns perSubnet
+// random hosts from each /24.
+func expandPools(perSubnet int) []netip.Addr {
+	full := perSubnet <= 0 || perSubnet >= 256
+	perPool := 256
+	if !full {
+		perPool = perSubnet
+	}
+	ips := make([]netip.Addr, 0, len(pools)*perPool)
 	for _, base := range pools {
-		for octet := 0; octet < 256; octet++ {
+		octets := make([]int, 256)
+		for i := range octets {
+			octets[i] = i
+		}
+		if !full {
+			rand.Shuffle(len(octets), func(i, j int) { octets[i], octets[j] = octets[j], octets[i] })
+			octets = octets[:perSubnet]
+		}
+		for _, octet := range octets {
 			addr, err := netip.ParseAddr(base + strconv.Itoa(octet))
 			if err != nil {
 				continue

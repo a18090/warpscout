@@ -27,6 +27,8 @@ func main() {
 	proxy := flag.String("proxy", "", "http(s)/socks5 proxy URL for registration")
 	register := flag.Bool("register", false, "only register a fresh WARP account (save it and exit, no scanning)")
 	accountPath := flag.String("account", defaultAccount, "path to cached WARP account file")
+	perSubnet := flag.Int("n", 10, "addresses to sample per /24 subnet")
+	full := flag.Bool("full", false, "scan all 256 addresses per /24 (overrides -n)")
 	flag.Parse()
 
 	awg, err := parseProto(*proto)
@@ -47,7 +49,11 @@ func main() {
 		}
 	}
 
-	ips := expandPools()
+	sample := *perSubnet
+	if *full {
+		sample = 0 // 0 => expandPools scans the whole /24
+	}
+	ips := expandPools(sample)
 
 	// Registration first (if no cached account), so a user on a censored network
 	// hits the "pass -proxy" hint immediately instead of after a full phase 1.
