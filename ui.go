@@ -122,6 +122,33 @@ func (p *progress) render(spin rune) {
 	fmt.Fprintf(os.Stderr, "\r\033[K%s", line)
 }
 
+// stepStart prints a transient in-progress line for a phase that has no step
+// count, mirroring progress's spinner start. stepDone collapses it into a ✔
+// summary line identical to progress.stop; stepFail clears it and reports an
+// error.
+func stepStart(label string, pal palette) {
+	if !isTerminal(os.Stderr) {
+		fmt.Fprintln(os.Stderr, label+"...")
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s %s...", pal.accent(string(spinnerFrames[0])), pal.title(label))
+}
+
+func stepDone(label, summary string, pal palette) {
+	if !isTerminal(os.Stderr) {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", label, summary)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "\r\033[K%s %s: %s\n", pal.ok("✔"), pal.title(label), summary)
+}
+
+func stepFail(msg string, pal palette) {
+	if isTerminal(os.Stderr) {
+		fmt.Fprint(os.Stderr, "\r\033[K")
+	}
+	fmt.Fprintln(os.Stderr, pal.fail(msg))
+}
+
 // stop ends the animation and prints a final summary line for the phase.
 func (p *progress) stop(summary string) {
 	if !p.tty {

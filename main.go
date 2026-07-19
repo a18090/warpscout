@@ -72,18 +72,19 @@ func main() {
 	// Probe with awg when any run needs it: AmneziaWG's junk evades DPI that plain
 	// wg trips, so its reachable ports are a superset - narrowing on wg could drop
 	// a port the awg run needs.
-	fmt.Fprintln(os.Stderr, errPal.dim("Phase 1: probing reachable WARP ports..."))
+	const phase1 = "Phase 1: probing reachable WARP ports"
+	stepStart(phase1, errPal)
 	open, err := reachablePorts(ctx, anyAWG(runs), ips, timeout, portProbeSample)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("phase 1 failed: %v", err)))
+		stepFail(fmt.Sprintf("phase 1 failed: %v", err), errPal)
 		os.Exit(1)
 	}
 	if len(open) == 0 {
-		fmt.Fprintln(os.Stderr, errPal.fail("no WARP port is reachable on this network"))
+		stepFail("no WARP port is reachable on this network", errPal)
 		os.Exit(1)
 	}
 	warpPorts = open // narrow phase 2 to the reachable ports
-	fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Reachable ports: %v", open)))
+	stepDone(phase1, fmt.Sprintf("reachable ports %v", open), errPal)
 
 	// Phase 2: bring up a small pool of persistent tunnels and reuse each across
 	// many IPs, reading the exit colo. Creating one tunnel per IP leaks gvisor
