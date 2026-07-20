@@ -105,6 +105,20 @@ func TestBaseUAPI(t *testing.T) {
 	}
 }
 
+func TestBaseUAPIOverridesJunkParams(t *testing.T) {
+	orig := awgJc
+	defer func() { awgJc = orig }()
+
+	awgJc = 99
+	awg, err := baseUAPI(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(awg, "jc=99") {
+		t.Errorf("override not reflected in UAPI: %q", awg)
+	}
+}
+
 func TestPeerUAPI(t *testing.T) {
 	peer, err := peerUAPI("1.2.3.4:2408")
 	if err != nil {

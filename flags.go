@@ -51,6 +51,12 @@ var flagGroups = []flagGroup{
 		{"r", "register", "", "register a fresh WARP account, save it and exit"},
 		{"a", "account", "FILE", "cached WARP account file"},
 	}},
+	{"AmneziaWG junk parameters", []flagSpec{
+		{"", "jc", "N", "junk packet count"},
+		{"", "jmin", "N", "min junk packet size"},
+		{"", "jmax", "N", "max junk packet size"},
+		{"", "i1", "PKT", "custom init packet (default: built-in iCloud probe)"},
+	}},
 	{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
@@ -97,9 +103,20 @@ func parseFlags() options {
 	boolFlag(&o.full, "f", "full")
 	// Long-only: no natural short letter, and the plain path is a rare escape hatch.
 	flag.BoolVar(&o.plain, "plain", false, "")
+	// awg junk params: default = the hardcoded values (warp.go), so omitting a
+	// flag keeps the built-in. baseUAPI reads these vars directly.
+	flag.IntVar(&awgJc, "jc", awgJc, "")
+	flag.IntVar(&awgJmin, "jmin", awgJmin, "")
+	flag.IntVar(&awgJmax, "jmax", awgJmax, "")
+	flag.StringVar(&awgI1, "i1", awgI1, "")
 
 	flag.Usage = usage
 	flag.Parse()
+
+	if awgJmin > awgJmax {
+		fmt.Fprintf(os.Stderr, "invalid junk params: -jmin (%d) must be <= -jmax (%d)\n", awgJmin, awgJmax)
+		os.Exit(2)
+	}
 	return o
 }
 
@@ -162,6 +179,10 @@ func flagColumnWidth() int {
 func defaultNote(pal palette, long string) string {
 	f := flag.CommandLine.Lookup(long)
 	if f == nil || f.DefValue == "" || f.DefValue == "false" {
+		return ""
+	}
+	// Some defaults (i1's init packet) are long enough to wreck the help layout.
+	if len(f.DefValue) > 40 {
 		return ""
 	}
 	return pal.dim(fmt.Sprintf(" (default %s)", f.DefValue))

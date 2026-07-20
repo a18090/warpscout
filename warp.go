@@ -21,8 +21,10 @@ const (
 	keepalive = 25
 )
 
-// AmneziaWG junk parameters (see DESC.md). Empty for plain WireGuard.
-const (
+// AmneziaWG junk parameters (see DESC.md). Empty for plain WireGuard. These are
+// the defaults; -jc/-jmin/-jmax/-i1 override them in place (flags.go), so they
+// are vars, not consts, like the WARP keys above.
+var (
 	awgJc   = 6
 	awgJmin = 10
 	awgJmax = 50
