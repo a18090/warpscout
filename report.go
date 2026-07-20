@@ -194,10 +194,12 @@ func writeConsole(w io.Writer, ph phaseResult, pal palette) {
 		return
 	}
 
-	writeBanner(w, pal, len(working), len(results))
-	fmt.Fprintf(w, "  Proto:    %s\n", pal.accent(strings.ToUpper(ph.run.name)))
-	fmt.Fprintf(w, "  Colo:     %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, coloFlag)))
-	fmt.Fprintf(w, "  Regions:  %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
+	writeBanner(w, pal)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Proto:    %s\n", pal.accent(strings.ToUpper(ph.run.name)))
+	fmt.Fprintf(w, "Colo:     %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, coloFlag)))
+	fmt.Fprintf(w, "Regions:  %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
+	fmt.Fprintf(w, "Working:  %s\n", pal.ok(strconv.Itoa(len(working)))+pal.dim(" / ")+strconv.Itoa(len(results))+" probed")
 	writeFlakyNote(w, pal, len(flaky))
 	writePicksTable(w, pal, working, flaky)
 }
@@ -208,29 +210,24 @@ func writeFlakyNote(w io.Writer, pal palette, n int) {
 	if n == 0 {
 		return
 	}
-	fmt.Fprintf(w, "  Flaky:    %s\n", pal.warn(fmt.Sprintf("%d (handshake ok, dropped on re-probe)", n)))
+	fmt.Fprintf(w, "Flaky:    %s\n", pal.warn(fmt.Sprintf("%d (handshake ok, dropped on re-probe)", n)))
 }
 
-const bannerWidth = 52
-
-// writeBanner prints a rounded box with the working/probed headline.
-func writeBanner(w io.Writer, pal palette, working, probed int) {
-	plain := fmt.Sprintf("  WARPSCOUT   %d working / %d probed", working, probed)
-	body := "  " + pal.title("WARPSCOUT") + "   " + pal.ok(strconv.Itoa(working)) + " working" +
-		pal.dim(" / ") + strconv.Itoa(probed) + " probed"
+// writeBanner prints a rounded box holding just the WARPSCOUT name; the counts
+// go on the lines below it.
+func writeBanner(w io.Writer, pal palette) {
+	plain := "  WARPSCOUT  "
+	body := "  " + pal.title("WARPSCOUT") + "  "
 	writeBox(w, pal, plain, body)
 }
 
-// writeBox draws a rounded box around one headline. plain is the uncolored text
-// (used only to size the padding); body is the colored text to print.
+// writeBox draws a rounded box around one headline, sized to its content. plain
+// is the uncolored text (used only to size the box); body is the colored text.
 func writeBox(w io.Writer, pal palette, plain, body string) {
-	pad := bannerWidth - len([]rune(plain))
-	if pad < 0 {
-		pad = 0
-	}
-	fmt.Fprintln(w, pal.dim("╭"+strings.Repeat("─", bannerWidth)+"╮"))
-	fmt.Fprintf(w, "%s%s%s%s\n", pal.dim("│"), body, strings.Repeat(" ", pad), pal.dim("│"))
-	fmt.Fprintln(w, pal.dim("╰"+strings.Repeat("─", bannerWidth)+"╯"))
+	width := len([]rune(plain))
+	fmt.Fprintln(w, pal.dim("╭"+strings.Repeat("─", width)+"╮"))
+	fmt.Fprintf(w, "%s%s%s\n", pal.dim("│"), body, pal.dim("│"))
+	fmt.Fprintln(w, pal.dim("╰"+strings.Repeat("─", width)+"╯"))
 }
 
 // Column widths for the subnet-picks table (excluding the 1-space cell padding).
@@ -255,17 +252,17 @@ func writePicksTable(w io.Writer, pal palette, working, flaky []endpointResult) 
 	}
 	row := func(cells ...string) string {
 		bar := pal.dim("│")
-		out := "  " + bar
+		out := bar
 		for _, c := range cells {
 			out += " " + c + " " + bar
 		}
 		return out
 	}
 
-	fmt.Fprintln(w, "\n  "+pal.title("Best endpoint per subnet (lowest ping)"))
-	fmt.Fprintln(w, "  "+pal.dim(border("┌", "┬", "┐")))
+	fmt.Fprintln(w, "\n"+pal.title("Best endpoint per subnet (lowest ping)"))
+	fmt.Fprintln(w, pal.dim(border("╭", "┬", "╮")))
 	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("PING", colPing)), pal.title(pad("EXIT", colExit))))
-	fmt.Fprintln(w, "  "+pal.dim(border("├", "┼", "┤")))
+	fmt.Fprintln(w, pal.dim(border("├", "┼", "┤")))
 	for _, base := range pools {
 		subnet := pad(base+"0/24", colSubnet)
 		if picks := subnetEndpoints(working, base); len(picks) > 0 {
@@ -280,7 +277,7 @@ func writePicksTable(w io.Writer, pal palette, working, flaky []endpointResult) 
 		}
 		fmt.Fprintln(w, row(subnet, pal.fail(pad("no working endpoints", colEndpoint)), pad("", colPing), pad("", colExit)))
 	}
-	fmt.Fprintln(w, "  "+pal.dim(border("└", "┴", "┘")))
+	fmt.Fprintln(w, pal.dim(border("╰", "┴", "╯")))
 }
 
 const colProto = 6
@@ -306,10 +303,10 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
 		probed = len(awg)
 	}
 	fmt.Fprintln(w)
-	plain := fmt.Sprintf("  WARPSCOUT   wg %d / awg %d working of %d probed", len(wgWork), len(awgWork), probed)
-	body := "  " + pal.title("WARPSCOUT") + "   wg " + pal.ok(strconv.Itoa(len(wgWork))) +
-		pal.dim(" / ") + "awg " + pal.ok(strconv.Itoa(len(awgWork))) + " working of " + strconv.Itoa(probed) + " probed"
-	writeBox(w, pal, plain, body)
+	writeBanner(w, pal)
+	fmt.Fprintln(w)
+	fmt.Fprintf(w, "Working:  wg %s%sawg %s of %d probed\n",
+		pal.ok(strconv.Itoa(len(wgWork))), pal.dim(" / "), pal.ok(strconv.Itoa(len(awgWork))), probed)
 	fmt.Fprintln(w)
 
 	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
@@ -323,7 +320,7 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
 	}
 	row := func(cells ...string) string {
 		bar := pal.dim("│")
-		out := "  " + bar
+		out := bar
 		for _, c := range cells {
 			out += " " + c + " " + bar
 		}
@@ -339,11 +336,11 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
 		return pal.dim(pad("-", colProto))
 	}
 
-	fmt.Fprintln(w, "  "+pal.title("WireGuard vs AmneziaWG per subnet"))
-	fmt.Fprintln(w, "  "+pal.dim(border("┌", "┬", "┐")))
+	fmt.Fprintln(w, pal.title("WireGuard vs AmneziaWG per subnet"))
+	fmt.Fprintln(w, pal.dim(border("╭", "┬", "╮")))
 	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("WG", colProto)), pal.title(pad("AWG", colProto)),
 		pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("PING", colPing)), pal.title(pad("EXIT", colExit))))
-	fmt.Fprintln(w, "  "+pal.dim(border("├", "┼", "┤")))
+	fmt.Fprintln(w, pal.dim(border("├", "┼", "┤")))
 	for _, base := range pools {
 		subnet := pad(base+"0/24", colSubnet)
 		wgCell := statusCell(wgWork, wgFlaky, base)
@@ -363,7 +360,7 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
 		}
 		fmt.Fprintln(w, row(subnet, wgCell, awgCell, endpointCell, pingCell, exitCell))
 	}
-	fmt.Fprintln(w, "  "+pal.dim(border("└", "┴", "┘")))
+	fmt.Fprintln(w, pal.dim(border("╰", "┴", "╯")))
 }
 
 // bestPick returns one endpoint to use for a subnet, preferring a durable wg one,
