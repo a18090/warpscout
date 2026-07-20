@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 type options struct {
@@ -106,9 +108,9 @@ func parseFlags() options {
 
 func usage() {
 	w := flag.CommandLine.Output()
-	pal := palette{enabled: colorEnabled(os.Stderr)}
+	st := newConStyles(lipgloss.NewRenderer(w))
 
-	fmt.Fprintln(w, pal.title("warpscout")+" - find the exit colo and region of Cloudflare WARP endpoints")
+	fmt.Fprintln(w, st.title.Render("warpscout")+" - find the exit colo and region of Cloudflare WARP endpoints")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Two-phase scan:")
 	fmt.Fprintln(w, "  - Phase 1 finds which WARP ports get through this network")
@@ -116,12 +118,12 @@ func usage() {
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Working endpoints are reported grouped per /24 subnet")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, pal.title("Usage:"))
-	fmt.Fprintf(w, "  %s [options]\n", pal.accent("warpscout"))
+	fmt.Fprintln(w, st.title.Render("Usage:"))
+	fmt.Fprintf(w, "  %s [options]\n", st.accent.Render("warpscout"))
 
 	col := flagColumnWidth()
 	for _, g := range flagGroups {
-		fmt.Fprintf(w, "\n%s\n", pal.title(g.title))
+		fmt.Fprintf(w, "\n%s\n", st.title.Render(g.title))
 		for _, s := range g.specs {
 			names := flagNames(s)
 			pad := col - len(names)
@@ -129,7 +131,7 @@ func usage() {
 				pad = 0
 			}
 			fmt.Fprintf(w, "%s%s%s%s\n",
-				pal.accent(names), strings.Repeat(" ", pad+2), s.help, defaultNote(pal, s.long))
+				st.accent.Render(names), strings.Repeat(" ", pad+2), s.help, defaultNote(st, s.long))
 		}
 	}
 }
@@ -153,7 +155,7 @@ func flagColumnWidth() int {
 	return max
 }
 
-func defaultNote(pal palette, long string) string {
+func defaultNote(st conStyles, long string) string {
 	f := flag.CommandLine.Lookup(long)
 	if f == nil || f.DefValue == "" || f.DefValue == "false" {
 		return ""
@@ -161,5 +163,5 @@ func defaultNote(pal palette, long string) string {
 	if len(f.DefValue) > 40 {
 		return ""
 	}
-	return pal.dim(fmt.Sprintf(" (default %s)", f.DefValue))
+	return st.dim.Render(fmt.Sprintf(" (default %s)", f.DefValue))
 }
