@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -24,7 +26,9 @@ func TestWriteConsolePalette(t *testing.T) {
 	}
 
 	var plain bytes.Buffer
-	writeConsole(&plain, ph, palette{enabled: false})
+	rPlain := lipgloss.NewRenderer(&plain)
+	rPlain.SetColorProfile(termenv.Ascii)
+	writeConsole(&plain, ph, rPlain)
 	if strings.Contains(plain.String(), "\033") {
 		t.Error("plain (non-TTY) console output must not contain ANSI escapes")
 	}
@@ -33,7 +37,9 @@ func TestWriteConsolePalette(t *testing.T) {
 	}
 
 	var colored bytes.Buffer
-	writeConsole(&colored, ph, palette{enabled: true})
+	rColor := lipgloss.NewRenderer(&colored)
+	rColor.SetColorProfile(termenv.TrueColor)
+	writeConsole(&colored, ph, rColor)
 	if !strings.Contains(colored.String(), "\033") {
 		t.Error("colored console output should contain ANSI escapes")
 	}

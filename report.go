@@ -9,6 +9,45 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/lipgloss/table"
+)
+
+// Palette colors shared by the console tables and the live TUI, so both read as
+// one design.
+var (
+	dimColor    = lipgloss.Color("240")
+	okColor     = lipgloss.Color("42")
+	failColor   = lipgloss.Color("196")
+	warnColor   = lipgloss.Color("214")
+	accentColor = lipgloss.Color("39")
+)
+
+// conStyles bundles the styles for one output, built from a renderer bound to a
+// specific writer so color degrades automatically on a non-TTY (pipe/NO_COLOR).
+type conStyles struct {
+	title, dim, ok, fail, warn, accent, box, cell lipgloss.Style
+}
+
+func newConStyles(r *lipgloss.Renderer) conStyles {
+	return conStyles{
+		title:  r.NewStyle().Bold(true),
+		dim:    r.NewStyle().Foreground(dimColor),
+		ok:     r.NewStyle().Foreground(okColor),
+		fail:   r.NewStyle().Foreground(failColor),
+		warn:   r.NewStyle().Foreground(warnColor),
+		accent: r.NewStyle().Foreground(accentColor),
+		box:    r.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(dimColor).Padding(0, 1).Bold(true),
+		cell:   r.NewStyle().Padding(0, 1),
+	}
+}
+
+// Row status used by the table StyleFunc to color a pick.
+const (
+	statusOK = iota
+	statusFlaky
+	statusNone
 )
 
 // endpointResult is the outcome of the full check for one IP.
@@ -23,14 +62,18 @@ type endpointResult struct {
 
 // pingStr renders the latency as "47ms" ("0.4ms" below 1ms, common from a
 // datacenter next to the edge), or "?" when it is unknown (0).
-func (r endpointResult) pingStr() string {
-	if r.latency <= 0 {
+func (r endpointResult) pingStr() string { return latencyStr(r.latency) }
+
+// latencyStr renders a latency as "47ms" ("0.4ms" below 1ms), or "?" when it is
+// unknown (0). Shared by the report tables and the live TUI feed.
+func latencyStr(d time.Duration) string {
+	if d <= 0 {
 		return "?"
 	}
-	if r.latency < time.Millisecond {
-		return fmt.Sprintf("%.2fms", float64(r.latency)/float64(time.Millisecond))
+	if d < time.Millisecond {
+		return fmt.Sprintf("%.2fms", float64(d)/float64(time.Millisecond))
 	}
-	return fmt.Sprintf("%dms", r.latency.Milliseconds())
+	return fmt.Sprintf("%dms", d.Milliseconds())
 }
 
 // working is a durable endpoint; flaky passed once but died on the re-probe
@@ -183,110 +226,112 @@ func subnetEndpoints(working []endpointResult, base string) []endpointResult {
 // the working/probed counts, the unique colos and regions found, and a boxed
 // table of one working endpoint per subnet. The full per-endpoint report goes
 // to the file (writeFullReport, plain text).
-func writeConsole(w io.Writer, ph phaseResult, pal palette) {
+func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer) {
+	st := newConStyles(r)
 	results := ph.results
 	working := workingSorted(results)
 	flaky := flakySorted(results)
 	fmt.Fprintln(w) // blank line between the phase-2 progress and the table
 	if len(working) == 0 {
-		fmt.Fprintln(w, pal.fail("No working endpoints found."))
-		writeFlakyNote(w, pal, len(flaky))
+		fmt.Fprintln(w, st.fail.Render("No working endpoints found."))
+		writeFlakyNote(w, st, len(flaky))
 		return
 	}
 
-	writeBanner(w, pal)
+	fmt.Fprintln(w, banner(st))
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Proto:    %s\n", pal.accent(strings.ToUpper(ph.run.name)))
-	fmt.Fprintf(w, "Colo:     %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, coloFlag)))
-	fmt.Fprintf(w, "Regions:  %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
-	fmt.Fprintf(w, "Working:  %s\n", pal.ok(strconv.Itoa(len(working)))+pal.dim(" / ")+strconv.Itoa(len(results))+" probed")
-	writeFlakyNote(w, pal, len(flaky))
-	writePicksTable(w, pal, working, flaky)
+	fmt.Fprintf(w, "Proto:    %s\n", st.accent.Render(strings.ToUpper(ph.run.name)))
+	fmt.Fprintf(w, "Colo:     %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, coloFlag)))
+	fmt.Fprintf(w, "Regions:  %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
+	fmt.Fprintf(w, "Working:  %s\n", st.ok.Render(strconv.Itoa(len(working)))+st.dim.Render(" / ")+strconv.Itoa(len(results))+" probed")
+	writeFlakyNote(w, st, len(flaky))
+	writePicksTable(w, st, working, flaky)
 }
 
 // writeFlakyNote prints the count of endpoints that handshook but were dropped
 // on the re-probe, if any.
-func writeFlakyNote(w io.Writer, pal palette, n int) {
+func writeFlakyNote(w io.Writer, st conStyles, n int) {
 	if n == 0 {
 		return
 	}
-	fmt.Fprintf(w, "Flaky:    %s\n", pal.warn(fmt.Sprintf("%d (handshake ok, dropped on re-probe)", n)))
+	fmt.Fprintf(w, "Flaky:    %s\n", st.warn.Render(fmt.Sprintf("%d (handshake ok, dropped on re-probe)", n)))
 }
 
-// writeBanner prints a rounded box holding just the WARPSCOUT name; the counts
-// go on the lines below it.
-func writeBanner(w io.Writer, pal palette) {
-	plain := "  WARPSCOUT  "
-	body := "  " + pal.title("WARPSCOUT") + "  "
-	writeBox(w, pal, plain, body)
+// banner renders the WARPSCOUT headline in a rounded box; the counts go on the
+// lines below it.
+func banner(st conStyles) string {
+	return st.box.Render("WARPSCOUT")
 }
 
-// writeBox draws a rounded box around one headline, sized to its content. plain
-// is the uncolored text (used only to size the box); body is the colored text.
-func writeBox(w io.Writer, pal palette, plain, body string) {
-	width := len([]rune(plain))
-	fmt.Fprintln(w, pal.dim("╭"+strings.Repeat("─", width)+"╮"))
-	fmt.Fprintf(w, "%s%s%s\n", pal.dim("│"), body, pal.dim("│"))
-	fmt.Fprintln(w, pal.dim("╰"+strings.Repeat("─", width)+"╯"))
+// pickRow is one table row plus the status used to color it.
+type pickRow struct {
+	cells  []string
+	status int
 }
-
-// Column widths for the subnet-picks table (excluding the 1-space cell padding).
-const (
-	colSubnet   = 16
-	colEndpoint = 22
-	colPing     = 7
-	colExit     = 16
-)
 
 // writePicksTable prints a boxed table of the lowest-ping endpoint per subnet: a
 // durable one when available, otherwise a flaky one flagged in yellow.
-func writePicksTable(w io.Writer, pal palette, working, flaky []endpointResult) {
-	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
-	widths := []int{colSubnet, colEndpoint, colPing, colExit}
-	border := func(l, m, r string) string {
-		parts := make([]string, len(widths))
-		for i, n := range widths {
-			parts[i] = strings.Repeat("─", n+2)
-		}
-		return l + strings.Join(parts, m) + r
-	}
-	row := func(cells ...string) string {
-		bar := pal.dim("│")
-		out := bar
-		for _, c := range cells {
-			out += " " + c + " " + bar
-		}
-		return out
-	}
-
-	fmt.Fprintln(w, "\n"+pal.title("Best endpoint per subnet (lowest ping)"))
-	fmt.Fprintln(w, pal.dim(border("╭", "┬", "╮")))
-	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("PING", colPing)), pal.title(pad("EXIT", colExit))))
-	fmt.Fprintln(w, pal.dim(border("├", "┼", "┤")))
+func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult) {
+	var rows []pickRow
 	for _, base := range pools {
-		subnet := pad(base+"0/24", colSubnet)
+		subnet := base + "0/24"
 		if picks := subnetEndpoints(working, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			fmt.Fprintln(w, row(subnet, pal.addr(pad(r.endpoint, colEndpoint)), pal.accent(pad(r.pingStr(), colPing)), pal.accent(pad(regionColo(r.exit), colExit))))
+			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), regionColo(r.exit)}, statusOK})
 			continue
 		}
 		if picks := subnetEndpoints(flaky, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			fmt.Fprintln(w, row(subnet, pal.warn(pad(r.endpoint, colEndpoint)), pal.warn(pad(r.pingStr(), colPing)), pal.warn(pad("flaky", colExit))))
+			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), "flaky"}, statusFlaky})
 			continue
 		}
-		fmt.Fprintln(w, row(subnet, pal.fail(pad("no working endpoints", colEndpoint)), pad("", colPing), pad("", colExit)))
+		rows = append(rows, pickRow{[]string{subnet, "no working endpoints", "", ""}, statusNone})
 	}
-	fmt.Fprintln(w, pal.dim(border("╰", "┴", "╯")))
+
+	fmt.Fprintln(w, "\n"+st.title.Render("Best endpoint per subnet (lowest ping)"))
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(st.dim).
+		Headers("SUBNET", "ENDPOINT", "PING", "EXIT").
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return st.cell.Bold(true)
+			}
+			switch rows[row].status {
+			case statusFlaky:
+				return st.cell.Foreground(warnColor)
+			case statusNone:
+				if col == 1 {
+					return st.cell.Foreground(failColor)
+				}
+				return st.cell.Foreground(dimColor)
+			}
+			switch col {
+			case 1:
+				return st.cell.Bold(true)
+			case 2, 3:
+				return st.cell.Foreground(accentColor)
+			}
+			return st.cell
+		})
+	for _, pr := range rows {
+		t.Row(pr.cells...)
+	}
+	fmt.Fprintln(w, t.Render())
 }
 
-const colProto = 6
+// bothRow is one -proto both row: cells plus the per-cell statuses that color it.
+type bothRow struct {
+	cells                 []string
+	wgStat, awgStat, pick int
+}
 
 // writeConsoleBoth renders the -proto both comparison: per subnet, whether wg
 // and awg each yield a durable (OK), flaky, or no (-) endpoint, plus one
 // concrete endpoint to use (a durable wg one preferred). Directly answers which
 // subnets work on plain WireGuard and which need AmneziaWG obfuscation.
-func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
+func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
+	st := newConStyles(r)
 	var wg, awg []endpointResult
 	for _, ph := range phases {
 		if ph.run.awg {
@@ -303,64 +348,81 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
 		probed = len(awg)
 	}
 	fmt.Fprintln(w)
-	writeBanner(w, pal)
+	fmt.Fprintln(w, banner(st))
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Working:  wg %s%sawg %s of %d probed\n",
-		pal.ok(strconv.Itoa(len(wgWork))), pal.dim(" / "), pal.ok(strconv.Itoa(len(awgWork))), probed)
+		st.ok.Render(strconv.Itoa(len(wgWork))), st.dim.Render(" / "), st.ok.Render(strconv.Itoa(len(awgWork))), probed)
 	fmt.Fprintln(w)
 
-	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
-	widths := []int{colSubnet, colProto, colProto, colEndpoint, colPing, colExit}
-	border := func(l, m, r string) string {
-		parts := make([]string, len(widths))
-		for i, n := range widths {
-			parts[i] = strings.Repeat("─", n+2)
-		}
-		return l + strings.Join(parts, m) + r
-	}
-	row := func(cells ...string) string {
-		bar := pal.dim("│")
-		out := bar
-		for _, c := range cells {
-			out += " " + c + " " + bar
-		}
-		return out
-	}
-	statusCell := func(work, flaky []endpointResult, base string) string {
+	protoStatus := func(work, flaky []endpointResult, base string) (string, int) {
 		if len(subnetEndpoints(work, base)) > 0 {
-			return pal.ok(pad("OK", colProto))
+			return "OK", statusOK
 		}
 		if len(subnetEndpoints(flaky, base)) > 0 {
-			return pal.warn(pad("flaky", colProto))
+			return "flaky", statusFlaky
 		}
-		return pal.dim(pad("-", colProto))
+		return "-", statusNone
 	}
 
-	fmt.Fprintln(w, pal.title("WireGuard vs AmneziaWG per subnet"))
-	fmt.Fprintln(w, pal.dim(border("╭", "┬", "╮")))
-	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("WG", colProto)), pal.title(pad("AWG", colProto)),
-		pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("PING", colPing)), pal.title(pad("EXIT", colExit))))
-	fmt.Fprintln(w, pal.dim(border("├", "┼", "┤")))
+	var rows []bothRow
 	for _, base := range pools {
-		subnet := pad(base+"0/24", colSubnet)
-		wgCell := statusCell(wgWork, wgFlaky, base)
-		awgCell := statusCell(awgWork, awgFlaky, base)
-		endpoint, ping, exit, flaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
+		wgTxt, wgStat := protoStatus(wgWork, wgFlaky, base)
+		awgTxt, awgStat := protoStatus(awgWork, awgFlaky, base)
+		endpoint, ping, exit, isFlaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
+		pick := statusOK
+		if isFlaky {
+			pick = statusFlaky
+		}
 		if endpoint == "" {
-			fmt.Fprintln(w, row(subnet, wgCell, awgCell, pal.dim(pad("-", colEndpoint)), pad("", colPing), pad("", colExit)))
-			continue
+			endpoint, ping, exit, pick = "-", "", "", statusNone
 		}
-		endpointCell := pal.addr(pad(endpoint, colEndpoint))
-		pingCell := pal.accent(pad(ping, colPing))
-		exitCell := pal.accent(pad(exit, colExit))
-		if flaky {
-			endpointCell = pal.warn(pad(endpoint, colEndpoint))
-			pingCell = pal.warn(pad(ping, colPing))
-			exitCell = pal.warn(pad(exit, colExit))
-		}
-		fmt.Fprintln(w, row(subnet, wgCell, awgCell, endpointCell, pingCell, exitCell))
+		rows = append(rows, bothRow{[]string{base + "0/24", wgTxt, awgTxt, endpoint, ping, exit}, wgStat, awgStat, pick})
 	}
-	fmt.Fprintln(w, pal.dim(border("╰", "┴", "╯")))
+
+	protoStyle := func(s int) lipgloss.Style {
+		switch s {
+		case statusOK:
+			return st.cell.Foreground(okColor)
+		case statusFlaky:
+			return st.cell.Foreground(warnColor)
+		}
+		return st.cell.Foreground(dimColor)
+	}
+
+	fmt.Fprintln(w, st.title.Render("WireGuard vs AmneziaWG per subnet"))
+	t := table.New().
+		Border(lipgloss.RoundedBorder()).
+		BorderStyle(st.dim).
+		Headers("SUBNET", "WG", "AWG", "ENDPOINT", "PING", "EXIT").
+		StyleFunc(func(row, col int) lipgloss.Style {
+			if row == table.HeaderRow {
+				return st.cell.Bold(true)
+			}
+			br := rows[row]
+			switch col {
+			case 1:
+				return protoStyle(br.wgStat)
+			case 2:
+				return protoStyle(br.awgStat)
+			}
+			switch br.pick {
+			case statusFlaky:
+				return st.cell.Foreground(warnColor)
+			case statusNone:
+				return st.cell.Foreground(dimColor)
+			}
+			switch col {
+			case 3:
+				return st.cell.Bold(true)
+			case 4, 5:
+				return st.cell.Foreground(accentColor)
+			}
+			return st.cell
+		})
+	for _, br := range rows {
+		t.Row(br.cells...)
+	}
+	fmt.Fprintln(w, t.Render())
 }
 
 // bestPick returns one endpoint to use for a subnet, preferring a durable wg one,

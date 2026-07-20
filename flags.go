@@ -19,6 +19,7 @@ type options struct {
 	pingCheck      bool
 	register       bool
 	full           bool
+	plain          bool
 }
 
 // flagSpec describes one flag for the help renderer. The default value is not
@@ -52,6 +53,7 @@ var flagGroups = []flagGroup{
 	}},
 	{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
+		{"", "plain", "", "force plain line output (no live TUI)"},
 	}},
 }
 
@@ -93,6 +95,8 @@ func parseFlags() options {
 	boolFlag(&o.pingCheck, "P", "ping")
 	boolFlag(&o.register, "r", "register")
 	boolFlag(&o.full, "f", "full")
+	// Long-only: no natural short letter, and the plain path is a rare escape hatch.
+	flag.BoolVar(&o.plain, "plain", false, "")
 
 	flag.Usage = usage
 	flag.Parse()
@@ -119,7 +123,7 @@ func usage() {
 	for _, g := range flagGroups {
 		fmt.Fprintf(w, "\n%s\n", pal.title(g.title))
 		for _, s := range g.specs {
-			names := fmt.Sprintf("  -%s, -%s %s", s.short, s.long, s.meta)
+			names := flagNames(s)
 			pad := col - len(names)
 			if pad < 0 {
 				pad = 0
@@ -130,14 +134,22 @@ func usage() {
 	}
 }
 
-// flagColumnWidth is the width of the widest "-s, --long meta" cell, so the
-// help text lines up in a column.
+// flagNames renders the "  -s, -long meta" cell, dropping the short pair when a
+// flag is long-only (empty short).
+func flagNames(s flagSpec) string {
+	if s.short == "" {
+		return fmt.Sprintf("  -%s %s", s.long, s.meta)
+	}
+	return fmt.Sprintf("  -%s, -%s %s", s.short, s.long, s.meta)
+}
+
+// flagColumnWidth is the width of the widest name cell, so the help text lines
+// up in a column.
 func flagColumnWidth() int {
 	max := 0
 	for _, g := range flagGroups {
 		for _, s := range g.specs {
-			n := len(fmt.Sprintf("  -%s, -%s %s", s.short, s.long, s.meta))
-			if n > max {
+			if n := len(flagNames(s)); n > max {
 				max = n
 			}
 		}

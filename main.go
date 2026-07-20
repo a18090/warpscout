@@ -3,19 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"os"
 	"time"
-)
 
-// pingWorkers bounds the post-scan latency pass. Host ICMP is cheap and tunnel-
-// independent, so it runs much wider than phase 2's tunnel pool.
-const pingWorkers = 50
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
 
 func main() {
 	opts := parseFlags()
 
 	errPal = palette{enabled: colorEnabled(os.Stderr)}
-	outPal := palette{enabled: colorEnabled(os.Stdout)}
 
 	runs, err := parseProto(opts.proto)
 	if err != nil {
@@ -23,7 +22,8 @@ func main() {
 		os.Exit(1)
 	}
 	timeout := time.Duration(opts.timeoutSec) * time.Second
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// A cached account skips registration (and its API/tunnel dependency) entirely.
 	haveConfig := false
@@ -68,6 +68,60 @@ func main() {
 		return
 	}
 
+	// The scan (phase 1 -> phase 2 -> colo resolve) runs through an emit seam: a
+	// live bubbletea dashboard on an interactive terminal, or plain lines on a
+	// pipe / NO_COLOR / -plain. In TUI mode the scan runs in a goroutine feeding
+	// program.Send while Run() owns the terminal; scanDone gates the result read
+	// so a q/Ctrl-C abort (which cancels ctx) can't race the workers.
+	var phases []phaseResult
+	var scanErr error
+	if usePlainOutput(opts) {
+		phases, scanErr = runScan(ctx, opts, runs, ips, timeout, plainEmit)
+	} else {
+		scanDone := make(chan struct{})
+		p := tea.NewProgram(newScanModel(cancel), tea.WithOutput(os.Stderr))
+		go func() {
+			phases, scanErr = runScan(ctx, opts, runs, ips, timeout, p.Send)
+			close(scanDone)
+		}()
+		if _, err := p.Run(); err != nil {
+			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
+			os.Exit(1)
+		}
+		<-scanDone
+	}
+	if scanErr != nil {
+		os.Exit(1) // the emitter already printed the failing phase
+	}
+
+	out := lipgloss.NewRenderer(os.Stdout)
+	if len(phases) == 1 {
+		writeConsole(os.Stdout, phases[0], out)
+	} else {
+		writeConsoleBoth(os.Stdout, phases, out)
+	}
+	reportPath := opts.output
+	if reportPath == "" {
+		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
+	}
+	if err := writeToFile(reportPath, phases); err != nil {
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", reportPath, err)))
+	} else {
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
+	}
+}
+
+// usePlainOutput reports whether to skip the live TUI and emit plain lines:
+// stderr is not a terminal, NO_COLOR is set, or -plain was passed.
+func usePlainOutput(opts options) bool {
+	return opts.plain || os.Getenv("NO_COLOR") != "" || !isTerminal(os.Stderr)
+}
+
+// runScan runs the two-phase scan, emitting progress through emit at each
+// milestone, and returns the per-protocol results. The returned error is the
+// source of truth (emit only drives the UI). host-ping is folded into phase 2 so
+// the live feed shows each endpoint with its latency as it is found.
+func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, emit emitter) ([]phaseResult, error) {
 	// Phase 1: find which WARP ports get through this network. Reachability is a
 	// network property (DPI / port filtering), not per-IP, so this probes a sample
 	// rather than every IP; phase 2 then scans all IPs on only the reachable ports.
@@ -75,18 +129,18 @@ func main() {
 	// wg trips, so its reachable ports are a superset - narrowing on wg could drop
 	// a port the awg run needs.
 	const phase1 = "Phase 1: probing reachable WARP ports"
-	stepStart(phase1, errPal)
+	emit(stepMsg{label: phase1})
 	open, err := reachablePorts(ctx, anyAWG(runs), ips, timeout, portProbeSample)
 	if err != nil {
-		stepFail(fmt.Sprintf("phase 1 failed: %v", err), errPal)
-		os.Exit(1)
+		emit(stepMsg{label: phase1, fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
+		return nil, err
 	}
 	if len(open) == 0 {
-		stepFail("no WARP port is reachable on this network", errPal)
-		os.Exit(1)
+		emit(stepMsg{label: phase1, fail: true, summary: "no WARP port is reachable on this network"})
+		return nil, fmt.Errorf("no reachable WARP port")
 	}
 	warpPorts = open // narrow phase 2 to the reachable ports
-	stepDone(phase1, fmt.Sprintf("reachable ports %v", open), errPal)
+	emit(stepMsg{label: phase1, done: true, summary: fmt.Sprintf("reachable ports %v", open)})
 
 	// Phase 2: bring up a small pool of persistent tunnels and reuse each across
 	// many IPs, reading the exit colo. Creating one tunnel per IP leaks gvisor
@@ -102,53 +156,37 @@ func main() {
 		if opts.pingCheck && !run.awg {
 			pings = durabilityPings
 		}
-		p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name), len(ips), errPal)
+		label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
+		emit(barBeginMsg{label: label, total: len(ips)})
 		work := func(tn *tunnel, i int) {
-			defer p2.inc()
+			defer emit(probedMsg{})
 			ip := ips[i]
 			r := endpointResult{ip: ip}
 			if t, endpoint, ok, durable := tn.trace(ctx, ip, timeout, pings); ok {
 				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, durable
+				// ponytail: host-ping inline in the narrow phase-2 pool (tunnel-jobs
+				// workers); if the working set grows large, move ping to an async wide
+				// pool feeding a pingedMsg.
+				if rtt, pok := pingHost(ip, timeout); pok {
+					r.latency = rtt
+				}
+				emit(foundMsg{endpoint: endpoint, latency: r.latency, exit: regionColo(t), flaky: !durable})
 			}
 			results[i] = r
 		}
 		if err := runTunnelPool(opts.tunnelParallel, run.awg, len(ips), work); err != nil {
-			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-			os.Exit(1)
+			emit(stepMsg{fail: true, summary: err.Error()})
+			return nil, err
 		}
-		p2.stop(errPal.ok("done"))
+		emit(barEndMsg{label: label, summary: "done"})
 		phases = append(phases, phaseResult{run, results})
 	}
 
-	// Ping each working endpoint directly from the host (no tunnel), so tables
-	// and the report can rank by latency. Independent of the tunnel and cheap, so
-	// it runs at a wider concurrency than phase 2.
-	for pi := range phases {
-		res := phases[pi].results
-		runPool(pingWorkers, len(res), func(i int) {
-			if !res[i].ok {
-				return
-			}
-			if rtt, ok := pingHost(res[i].ip, timeout); ok {
-				res[i].latency = rtt
-			}
-		})
-	}
-
+	const coloStep = "Resolving exit regions"
+	emit(stepMsg{label: coloStep})
 	coloISO = resolveColoISO(ctx, exitColosOf(phases))
+	emit(stepMsg{label: coloStep, done: true, summary: "done"})
 
-	if len(phases) == 1 {
-		writeConsole(os.Stdout, phases[0], outPal)
-	} else {
-		writeConsoleBoth(os.Stdout, phases, outPal)
-	}
-	reportPath := opts.output
-	if reportPath == "" {
-		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
-	}
-	if err := writeToFile(reportPath, phases); err != nil {
-		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", reportPath, err)))
-	} else {
-		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
-	}
+	emit(doneMsg{})
+	return phases, nil
 }
