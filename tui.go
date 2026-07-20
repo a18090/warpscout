@@ -31,7 +31,8 @@ type (
 	foundMsg  struct {
 		endpoint string
 		latency  time.Duration
-		exit     string
+		exit     string // exit region ("🇷🇺 RU")
+		colo     string // WARP edge node ("🇷🇺 DME")
 		flaky    bool
 	}
 	barEndMsg struct{ label, summary string }
@@ -207,7 +208,7 @@ func (m scanModel) renderFeed() string {
 		rows = rows[:feedMax]
 	}
 	var b strings.Builder
-	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" EXIT") + "\n")
+	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" "+pad("EXIT", 10)+" COLO") + "\n")
 	for _, r := range rows {
 		ep := pad(r.endpoint, 22)
 		ping := pad(latencyStr(r.latency), 8)
@@ -215,7 +216,8 @@ func (m scanModel) renderFeed() string {
 			b.WriteString(st.warn.Render(ep+" "+ping+" flaky") + "\n")
 			continue
 		}
-		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + r.exit + "\n")
+		exit := r.exit + strings.Repeat(" ", max(0, 10-lipgloss.Width(r.exit)))
+		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + exit + " " + r.colo + "\n")
 	}
 	if extra > 0 {
 		b.WriteString(st.dim.Render(fmt.Sprintf("… +%d more", extra)) + "\n")

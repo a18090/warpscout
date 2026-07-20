@@ -170,7 +170,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 				if rtt, pok := pingHost(ip, timeout); pok {
 					r.latency = rtt
 				}
-				emit(foundMsg{endpoint: endpoint, latency: r.latency, exit: regionColo(t), flaky: !durable})
+				emit(foundMsg{endpoint: endpoint, latency: r.latency, exit: exitRegion(t), colo: exitColo(t), flaky: !durable})
 			}
 			results[i] = r
 		}

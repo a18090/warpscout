@@ -90,17 +90,22 @@ func withFlag(flag, code string) string {
 	return flag + " " + code
 }
 
-// regionColo renders "<flag> loc / <flag> colo" (e.g. 🇷🇺 RU / 🇩🇪 FRA), with "?"
-// for missing fields and the flag omitted when the country is unknown.
-func regionColo(t traceResult) string {
-	loc, colo := t.loc, t.colo
-	if loc == "" {
-		loc = "?"
+// exitRegion renders the exit region as external services see it ("🇷🇺 RU"), or
+// "?" when unknown.
+func exitRegion(t traceResult) string {
+	if t.loc == "" {
+		return "?"
 	}
-	if colo == "" {
-		colo = "?"
+	return withFlag(flagEmoji(t.loc), t.loc)
+}
+
+// exitColo renders the WARP edge node the tunnel landed on ("🇷🇺 DME"), or "?"
+// when unknown.
+func exitColo(t traceResult) string {
+	if t.colo == "" {
+		return "?"
 	}
-	return withFlag(flagEmoji(t.loc), loc) + " / " + withFlag(coloFlag(t.colo), colo)
+	return withFlag(coloFlag(t.colo), t.colo)
 }
 
 // exitColosOf returns the distinct non-empty exit colos across every phase.
@@ -172,7 +177,8 @@ func bestByPing(picks []endpointResult) endpointResult {
 func writeHeader(w io.Writer, working, probed int) {
 	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
 	fmt.Fprintf(w, "  WARP endpoints: %d working / %d probed\n", working, probed)
-	fmt.Fprintln(w, "  EXIT = real exit region/colo seen through the tunnel")
+	fmt.Fprintln(w, "  EXIT = exit region external services see through the tunnel")
+	fmt.Fprintln(w, "  COLO = Cloudflare WARP edge node the tunnel landed on")
 	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
 }
 
@@ -199,10 +205,10 @@ func writeFullReport(w io.Writer, results []endpointResult) {
 		}
 		fmt.Fprintf(w, "\n  ── %s0/24 ──  (sorted by ping)\n", base)
 		for _, r := range subnet {
-			fmt.Fprintf(w, "    %-22s %-8s %s\n", r.endpoint, r.pingStr(), regionColo(r.exit))
+			fmt.Fprintf(w, "    %-22s %-8s %-10s %s\n", r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit))
 		}
 		for _, r := range subnetFlaky {
-			fmt.Fprintf(w, "    %-22s %-8s %-10s %s\n", r.endpoint, r.pingStr(), regionColo(r.exit), "flaky")
+			fmt.Fprintf(w, "    %-22s %-8s %-10s %-10s %s\n", r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit), "flaky")
 		}
 	}
 
@@ -277,22 +283,22 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult)
 		subnet := base + "0/24"
 		if picks := subnetEndpoints(working, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), regionColo(r.exit)}, statusOK})
+			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit)}, statusOK})
 			continue
 		}
 		if picks := subnetEndpoints(flaky, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), "flaky"}, statusFlaky})
+			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), "flaky", ""}, statusFlaky})
 			continue
 		}
-		rows = append(rows, pickRow{[]string{subnet, "no working endpoints", "", ""}, statusNone})
+		rows = append(rows, pickRow{[]string{subnet, "no working endpoints", "", "", ""}, statusNone})
 	}
 
 	fmt.Fprintln(w, "\n"+st.title.Render("Best endpoint per subnet (lowest ping)"))
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(st.dim).
-		Headers("SUBNET", "ENDPOINT", "PING", "EXIT").
+		Headers("SUBNET", "ENDPOINT", "PING", "EXIT", "COLO").
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == table.HeaderRow {
 				return st.cell.Bold(true)
@@ -368,15 +374,15 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
 	for _, base := range pools {
 		wgTxt, wgStat := protoStatus(wgWork, wgFlaky, base)
 		awgTxt, awgStat := protoStatus(awgWork, awgFlaky, base)
-		endpoint, ping, exit, isFlaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
+		endpoint, ping, region, colo, isFlaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
 		pick := statusOK
 		if isFlaky {
 			pick = statusFlaky
 		}
 		if endpoint == "" {
-			endpoint, ping, exit, pick = "-", "", "", statusNone
+			endpoint, ping, region, colo, pick = "-", "", "", "", statusNone
 		}
-		rows = append(rows, bothRow{[]string{base + "0/24", wgTxt, awgTxt, endpoint, ping, exit}, wgStat, awgStat, pick})
+		rows = append(rows, bothRow{[]string{base + "0/24", wgTxt, awgTxt, endpoint, ping, region, colo}, wgStat, awgStat, pick})
 	}
 
 	protoStyle := func(s int) lipgloss.Style {
@@ -393,7 +399,7 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(st.dim).
-		Headers("SUBNET", "WG", "AWG", "ENDPOINT", "PING", "EXIT").
+		Headers("SUBNET", "WG", "AWG", "ENDPOINT", "PING", "EXIT", "COLO").
 		StyleFunc(func(row, col int) lipgloss.Style {
 			if row == table.HeaderRow {
 				return st.cell.Bold(true)
@@ -427,16 +433,16 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
 
 // bestPick returns one endpoint to use for a subnet, preferring a durable wg one,
 // then durable awg, then flaky wg, then flaky awg; within the chosen set it picks
-// the lowest ping. flaky reports whether the chosen endpoint is only flaky. Empty
-// endpoint means nothing worked.
-func bestPick(base string, sets ...[]endpointResult) (endpoint, ping, exit string, flaky bool) {
+// the lowest ping, returning its exit region and colo separately. flaky reports
+// whether the chosen endpoint is only flaky. Empty endpoint means nothing worked.
+func bestPick(base string, sets ...[]endpointResult) (endpoint, ping, region, colo string, flaky bool) {
 	for i, set := range sets {
 		if picks := subnetEndpoints(set, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			return r.endpoint, r.pingStr(), regionColo(r.exit), i >= 2 // sets[2:] are the flaky lists
+			return r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit), i >= 2 // sets[2:] are the flaky lists
 		}
 	}
-	return "", "", "", false
+	return "", "", "", "", false
 }
 
 // uniqueSorted collects the non-empty key(r) values, sorted, each rendered with
@@ -471,7 +477,7 @@ func writeSubnetPicks(w io.Writer, working []endpointResult) {
 			continue
 		}
 		r := bestByPing(picks)
-		fmt.Fprintf(w, "  %-18s %-22s %-8s %s\n", subnet, r.endpoint, r.pingStr(), regionColo(r.exit))
+		fmt.Fprintf(w, "  %-18s %-22s %-8s %-10s %s\n", subnet, r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit))
 	}
 }
 
