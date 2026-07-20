@@ -104,7 +104,7 @@ func usage() {
 	w := flag.CommandLine.Output()
 	pal := palette{enabled: colorEnabled(os.Stderr)}
 
-	fmt.Fprintln(w, pal.title("warpscout")+" - scan Cloudflare WARP endpoint pools for working endpoints")
+	fmt.Fprintln(w, pal.title("warpscout")+" - find the exit colo and region of Cloudflare WARP endpoints")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "Two-phase scan:")
 	fmt.Fprintln(w, "  - Phase 1 finds which WARP ports get through this network")
