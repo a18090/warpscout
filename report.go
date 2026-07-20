@@ -5,6 +5,7 @@ import (
 	"io"
 	"math/rand"
 	"net/netip"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -390,4 +391,28 @@ func writeSubnetPicks(w io.Writer, working []endpointResult) {
 		r := picks[rand.Intn(len(picks))]
 		fmt.Fprintf(w, "  %-18s %-22s %s\n", subnet, r.endpoint, regionColo(r.exit))
 	}
+}
+
+// phaseResult pairs a protocol run with its per-endpoint results.
+type phaseResult struct {
+	run     protoRun
+	results []endpointResult
+}
+
+func writeToFile(path string, phases []phaseResult) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for i, ph := range phases {
+		if len(phases) > 1 {
+			if i > 0 {
+				fmt.Fprintln(f)
+			}
+			fmt.Fprintf(f, "########## proto=%s ##########\n", ph.run.name)
+		}
+		writeFullReport(f, ph.results)
+	}
+	return nil
 }

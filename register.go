@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"strings"
@@ -227,4 +228,85 @@ func tunnelClient(tnet *netstack.Net) (*http.Client, error) {
 			},
 		},
 	}, nil
+}
+
+// tunnelCandidates is how many live endpoints the fallback discovers before it
+// stops scanning and starts bringing up a registration tunnel.
+const tunnelCandidates = 20
+
+// fallbackDiscoveryWorkers is the TCP-probe concurrency for that fallback
+// endpoint discovery (discoverAlive). Only used when the API is unreachable
+// directly and no cached account exists.
+const fallbackDiscoveryWorkers = 50
+
+// obtainAccount registers a fresh WARP config, choosing how to reach the API:
+// via proxy if given, directly if reachable, otherwise through a WARP tunnel on
+// a handful of live endpoints discovered on demand.
+func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr, workers int, timeout time.Duration) (account, error) {
+	if proxy != "" {
+		c, err := proxyClient(proxy)
+		if err != nil {
+			return account{}, err
+		}
+		return registerWARP(ctx, c)
+	}
+
+	fmt.Fprintln(os.Stderr, errPal.dim("Checking Cloudflare API availability..."))
+	direct := &http.Client{Timeout: registerTimeout}
+	if apiReachable(direct) {
+		return registerWARP(ctx, direct)
+	}
+
+	fmt.Fprintf(os.Stderr, "\n%s\n\n", errPal.fail("API unreachable directly"))
+	fmt.Fprintln(os.Stderr, errPal.dim("Registering through a WARP tunnel (pass -proxy to use a proxy instead)"))
+	fmt.Fprintln(os.Stderr, errPal.dim("  discovering a live endpoint for the tunnel..."))
+	candidates := discoverAlive(ctx, ips, workers, timeout, tunnelCandidates)
+	if len(candidates) == 0 {
+		return account{}, fmt.Errorf("no live endpoints for tunnel fallback")
+	}
+
+	// Try the requested protocol first, then the other: plain WireGuard often
+	// completes a handshake but passes no data on censored networks, where
+	// AmneziaWG's junk gets through (see DESC.md). Registration itself is the
+	// data-path test, so fall through to the other proto if it fails.
+	var lastErr error
+	for _, p := range []bool{awg, !awg} {
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("  trying %s tunnel...", protoName(p))))
+		a, err := registerViaTunnel(ctx, p, candidates, timeout)
+		if err == nil {
+			return a, nil
+		}
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("  %s tunnel failed: %v", protoName(p), err)))
+		lastErr = err
+	}
+	return account{}, lastErr
+}
+
+// registerViaTunnel brings up a tunnel on hardcoded keys, points it at the first
+// live endpoint that handshakes, and registers through it.
+func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration) (account, error) {
+	tn, err := newTunnel(awg)
+	if err != nil {
+		return account{}, err
+	}
+	defer tn.Close()
+
+	connectCtx, cancel := context.WithTimeout(ctx, tunnelDialTimout)
+	defer cancel()
+	connected := false
+	for _, ip := range ips {
+		if tn.connect(connectCtx, ip, timeout) {
+			connected = true
+			break
+		}
+	}
+	if !connected {
+		return account{}, fmt.Errorf("could not tunnel to any live endpoint")
+	}
+
+	client, err := tunnelClient(tn.tnet)
+	if err != nil {
+		return account{}, err
+	}
+	return registerWARP(ctx, client)
 }

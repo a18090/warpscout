@@ -79,3 +79,33 @@ func peerUAPI(endpoint string) (string, error) {
 	fmt.Fprintf(&b, "persistent_keepalive_interval=%d\n", keepalive)
 	return b.String(), nil
 }
+
+// protoRun is one protocol to verify endpoints with.
+type protoRun struct {
+	awg  bool
+	name string
+}
+
+// parseProto expands -proto into the ordered list of runs. "both" verifies wg
+// first (preferred, no obfuscation) then awg.
+func parseProto(p string) ([]protoRun, error) {
+	wg := protoRun{false, "wg"}
+	awg := protoRun{true, "awg"}
+	switch p {
+	case "wg":
+		return []protoRun{wg}, nil
+	case "awg":
+		return []protoRun{awg}, nil
+	case "both":
+		return []protoRun{wg, awg}, nil
+	default:
+		return nil, fmt.Errorf("invalid -proto %q: use wg, awg or both", p)
+	}
+}
+
+func protoName(awg bool) string {
+	if awg {
+		return "awg"
+	}
+	return "wg"
+}

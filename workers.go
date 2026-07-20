@@ -1,0 +1,70 @@
+package main
+
+import (
+	"fmt"
+	"os"
+	"sync"
+)
+
+// runPool runs fn(0..n-1) with at most workers running concurrently.
+func runPool(workers, n int, fn func(i int)) {
+	if workers < 1 {
+		workers = 1
+	}
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			fn(i)
+		}(i)
+	}
+	wg.Wait()
+}
+
+// runTunnelPool creates up to workers persistent tunnels and dispatches indices
+// 0..n-1 across them, each worker reusing its tunnel for every job it pulls.
+func runTunnelPool(workers int, awg bool, n int, fn func(tn *tunnel, i int)) error {
+	if workers < 1 {
+		workers = 1
+	}
+
+	var tunnels []*tunnel
+	for len(tunnels) < workers {
+		tn, err := newTunnel(awg)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "tunnel setup failed: %v\n", err)
+			break
+		}
+		tunnels = append(tunnels, tn)
+	}
+	if len(tunnels) == 0 {
+		return fmt.Errorf("no tunnels could be created")
+	}
+	defer func() {
+		for _, tn := range tunnels {
+			tn.Close()
+		}
+	}()
+
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for _, tn := range tunnels {
+		wg.Add(1)
+		go func(tn *tunnel) {
+			defer wg.Done()
+			for i := range jobs {
+				fn(tn, i)
+			}
+		}(tn)
+	}
+	for i := 0; i < n; i++ {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return nil
+}
