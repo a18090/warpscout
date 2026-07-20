@@ -24,7 +24,17 @@ type endpointResult struct {
 func (r endpointResult) working() bool { return r.ok && r.durable }
 func (r endpointResult) flaky() bool   { return r.ok && !r.durable }
 
-// regionColo renders "loc/colo" (e.g. RU/DME), with "?" for missing fields.
+// withFlag prefixes code with its flag emoji ("🇷🇺 RU"), or returns code alone
+// when the flag is unknown.
+func withFlag(flag, code string) string {
+	if flag == "" {
+		return code
+	}
+	return flag + " " + code
+}
+
+// regionColo renders "<flag> loc / <flag> colo" (e.g. 🇷🇺 RU / 🇩🇪 FRA), with "?"
+// for missing fields and the flag omitted when the country is unknown.
 func regionColo(t traceResult) string {
 	loc, colo := t.loc, t.colo
 	if loc == "" {
@@ -33,7 +43,27 @@ func regionColo(t traceResult) string {
 	if colo == "" {
 		colo = "?"
 	}
-	return loc + "/" + colo
+	return withFlag(flagEmoji(t.loc), loc) + " / " + withFlag(coloFlag(t.colo), colo)
+}
+
+// exitColosOf returns the distinct non-empty exit colos across every phase.
+func exitColosOf(phases []phaseResult) []string {
+	seen := make(map[string]struct{})
+	var colos []string
+	for _, ph := range phases {
+		for _, r := range ph.results {
+			c := r.exit.colo
+			if c == "" {
+				continue
+			}
+			if _, ok := seen[c]; ok {
+				continue
+			}
+			seen[c] = struct{}{}
+			colos = append(colos, c)
+		}
+	}
+	return colos
 }
 
 // workingSorted returns the durable endpoints sorted by exit colo then endpoint.
@@ -154,8 +184,8 @@ func writeConsole(w io.Writer, ph phaseResult, pal palette) {
 
 	writeBanner(w, pal, len(working), len(results))
 	fmt.Fprintf(w, "  Proto:    %s\n", pal.accent(strings.ToUpper(ph.run.name)))
-	fmt.Fprintf(w, "  Colo:     %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo })))
-	fmt.Fprintf(w, "  Regions:  %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc })))
+	fmt.Fprintf(w, "  Colo:     %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, coloFlag)))
+	fmt.Fprintf(w, "  Regions:  %s\n", pal.accent(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
 	writeFlakyNote(w, pal, len(flaky))
 	writePicksTable(w, pal, working, flaky)
 }
@@ -195,7 +225,7 @@ func writeBox(w io.Writer, pal palette, plain, body string) {
 const (
 	colSubnet   = 16
 	colEndpoint = 22
-	colExit     = 8
+	colExit     = 16
 )
 
 // writePicksTable prints a boxed table of one random endpoint per subnet: a
@@ -326,8 +356,9 @@ func bestPick(base string, sets ...[]endpointResult) (endpoint, exit string, fla
 	return "", "", false
 }
 
-// uniqueSorted collects the non-empty key(r) values, sorted and space-joined.
-func uniqueSorted(working []endpointResult, key func(endpointResult) string) string {
+// uniqueSorted collects the non-empty key(r) values, sorted, each rendered with
+// its flag (flagFor(v) may return "" to omit it), and space-joined.
+func uniqueSorted(working []endpointResult, key func(endpointResult) string, flagFor func(string) string) string {
 	seen := make(map[string]struct{})
 	for _, r := range working {
 		if v := key(r); v != "" {
@@ -339,6 +370,9 @@ func uniqueSorted(working []endpointResult, key func(endpointResult) string) str
 		vals = append(vals, v)
 	}
 	sort.Strings(vals)
+	for i, v := range vals {
+		vals[i] = withFlag(flagFor(v), v)
+	}
 	return strings.Join(vals, "  ")
 }
 

@@ -119,6 +119,8 @@ func main() {
 		phases = append(phases, phaseResult{run, results})
 	}
 
+	coloISO = resolveColoISO(ctx, exitColosOf(phases))
+
 	if len(phases) == 1 {
 		writeConsole(os.Stdout, phases[0], outPal)
 	} else {

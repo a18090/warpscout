@@ -146,6 +146,22 @@ func TestExpandPools(t *testing.T) {
 	}
 }
 
+func TestFlagEmoji(t *testing.T) {
+	cases := map[string]string{
+		"RU": "\U0001F1F7\U0001F1FA",
+		"de": "\U0001F1E9\U0001F1EA", // case-insensitive
+		"?":  "",                     // missing field
+		"":   "",
+		"USA": "", // not two letters
+		"R1": "", // digit
+	}
+	for in, want := range cases {
+		if got := flagEmoji(in); got != want {
+			t.Errorf("flagEmoji(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestParseTrace(t *testing.T) {
 	body := "fl=123\nip=1.2.3.4\ncolo=FRA\nloc=DE\nwarp=on\n"
 	got := parseTrace(body)
