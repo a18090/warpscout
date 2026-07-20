@@ -60,6 +60,7 @@ func main() {
 		}
 		applyAccount(a)
 		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", opts.accountPath)))
+		fmt.Fprintln(os.Stderr)
 	}
 
 	// -register is a register-only mode: save the account and stop, no scanning.
