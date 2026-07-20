@@ -94,19 +94,19 @@ func main() {
 	var phases []phaseResult
 	for _, run := range runs {
 		results := make([]endpointResult, len(ips))
-		// The durability ping check only makes sense for wg: awg's junk params
-		// already fix the death-on-data-volume, so a lost ping through an awg
-		// tunnel is measurement noise, not a real drop. Trust the awg trace.
-		durability := opts.durability
-		if run.awg {
-			durability = 0
+		// The ping check is opt-in (-ping) and only makes sense for wg: awg's junk
+		// params already fix the death-on-data-volume, so a lost ping through an
+		// awg tunnel is measurement noise, not a real drop. Trust the awg trace.
+		pings := 0
+		if opts.pingCheck && !run.awg {
+			pings = durabilityPings
 		}
 		p2 := newProgress(fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name), len(ips), errPal)
 		work := func(tn *tunnel, i int) {
 			defer p2.inc()
 			ip := ips[i]
 			r := endpointResult{ip: ip}
-			if t, endpoint, ok, durable := tn.trace(ctx, ip, timeout, durability); ok {
+			if t, endpoint, ok, durable := tn.trace(ctx, ip, timeout, pings); ok {
 				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, durable
 			}
 			results[i] = r

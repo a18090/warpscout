@@ -11,12 +11,12 @@ import (
 type options struct {
 	tunnelParallel int
 	timeoutSec     int
-	durability     int
 	perSubnet      int
 	proto          string
 	output         string
 	proxy          string
 	accountPath    string
+	pingCheck      bool
 	register       bool
 	full           bool
 }
@@ -40,7 +40,7 @@ var flagGroups = []flagGroup{
 	{"Scan tuning", []flagSpec{
 		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
 		{"t", "timeout", "SEC", "per-request timeout"},
-		{"d", "durability", "N", "durability probe pings per working tunnel (wg only, ignored for awg); 0 disables"},
+		{"P", "ping", "", "ping wg tunnels through to catch flaky (TSPU-dropped) endpoints; off by default for speed"},
 		{"n", "sample", "N", "addresses to sample per /24 subnet"},
 		{"f", "full", "", "scan all 256 addresses per /24 (overrides -sample)"},
 	}},
@@ -82,15 +82,15 @@ func parseFlags() options {
 	// long a dead endpoint stalls a worker waiting for a handshake that never
 	// comes. 2s keeps a wide margin over real latency while cutting that stall.
 	intFlag(&o.timeoutSec, 2, "t", "timeout")
-	// A working tunnel is pinged this many times: TSPU passes a WG handshake and
-	// a few packets, then drops the peer, so a single fetch false-positives. Any
-	// lost reply marks it flaky.
-	intFlag(&o.durability, 10, "d", "durability")
 	intFlag(&o.perSubnet, 10, "n", "sample")
 	strFlag(&o.proto, "wg", "p", "proto")
 	strFlag(&o.output, "", "o", "output")
 	strFlag(&o.proxy, "", "x", "proxy")
 	strFlag(&o.accountPath, defaultAccount, "a", "account")
+	// Off by default: pinging each working tunnel catches TSPU (passes a WG
+	// handshake and a few packets, then drops the peer) but finds nothing on
+	// unrestricted networks and only slows phase 2. Opt in on censored networks.
+	boolFlag(&o.pingCheck, "P", "ping")
 	boolFlag(&o.register, "r", "register")
 	boolFlag(&o.full, "f", "full")
 

@@ -148,8 +148,9 @@ func (t *tunnel) fetch(ctx context.Context, timeout time.Duration) (string, bool
 }
 
 const (
-	pingTarget   = "1.1.1.1"
-	pingInterval = 500 * time.Millisecond
+	pingTarget      = "1.1.1.1"
+	pingInterval    = 500 * time.Millisecond
+	durabilityPings = 10
 )
 
 // pingDurable sends up to count ICMP echoes through the established tunnel to
