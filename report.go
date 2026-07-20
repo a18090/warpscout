@@ -129,14 +129,17 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 }
 
 func lessByPing(a, b endpointResult) bool {
-	ap, bp := a.latency, b.latency
-	if (ap <= 0) != (bp <= 0) {
-		return ap > 0
-	}
-	if ap != bp {
-		return ap < bp
+	if a.latency != b.latency {
+		return lessDur(a.latency, b.latency)
 	}
 	return a.endpoint < b.endpoint
+}
+
+func lessDur(a, b time.Duration) bool {
+	if (a <= 0) != (b <= 0) {
+		return a > 0
+	}
+	return a < b
 }
 
 func bestByPing(picks []endpointResult) endpointResult {
@@ -233,8 +236,9 @@ func banner(st conStyles) string {
 }
 
 type pickRow struct {
-	cells  []string
-	status int
+	cells   []string
+	status  int
+	latency time.Duration
 }
 
 func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult) {
@@ -243,16 +247,17 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult)
 		subnet := base + "0/24"
 		if picks := subnetEndpoints(working, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit)}, statusOK})
+			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit)}, statusOK, r.latency})
 			continue
 		}
 		if picks := subnetEndpoints(flaky, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), "flaky", ""}, statusFlaky})
+			rows = append(rows, pickRow{[]string{subnet, r.endpoint, r.pingStr(), "flaky", ""}, statusFlaky, 0})
 			continue
 		}
-		rows = append(rows, pickRow{[]string{subnet, "no working endpoints", "", "", ""}, statusNone})
+		rows = append(rows, pickRow{[]string{subnet, "no working endpoints", "", "", ""}, statusNone, 0})
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return lessDur(rows[i].latency, rows[j].latency) })
 
 	fmt.Fprintln(w, "\n"+st.title.Render("Best endpoint per subnet (lowest ping)"))
 	t := table.New().
@@ -289,6 +294,7 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult)
 type bothRow struct {
 	cells                 []string
 	wgStat, awgStat, pick int
+	latency               time.Duration
 }
 
 func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
@@ -329,7 +335,7 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
 	for _, base := range pools {
 		wgTxt, wgStat := protoStatus(wgWork, wgFlaky, base)
 		awgTxt, awgStat := protoStatus(awgWork, awgFlaky, base)
-		endpoint, ping, region, colo, isFlaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
+		endpoint, ping, region, colo, latency, isFlaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
 		pick := statusOK
 		if isFlaky {
 			pick = statusFlaky
@@ -337,8 +343,9 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
 		if endpoint == "" {
 			endpoint, ping, region, colo, pick = "-", "", "", "", statusNone
 		}
-		rows = append(rows, bothRow{[]string{base + "0/24", wgTxt, awgTxt, endpoint, ping, region, colo}, wgStat, awgStat, pick})
+		rows = append(rows, bothRow{[]string{base + "0/24", wgTxt, awgTxt, endpoint, ping, region, colo}, wgStat, awgStat, pick, latency})
 	}
+	sort.SliceStable(rows, func(i, j int) bool { return lessDur(rows[i].latency, rows[j].latency) })
 
 	protoStyle := func(s int) lipgloss.Style {
 		switch s {
@@ -386,14 +393,14 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
 	fmt.Fprintln(w, t.Render())
 }
 
-func bestPick(base string, sets ...[]endpointResult) (endpoint, ping, region, colo string, flaky bool) {
+func bestPick(base string, sets ...[]endpointResult) (endpoint, ping, region, colo string, latency time.Duration, flaky bool) {
 	for i, set := range sets {
 		if picks := subnetEndpoints(set, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			return r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit), i >= 2
+			return r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit), r.latency, i >= 2
 		}
 	}
-	return "", "", "", "", false
+	return "", "", "", "", 0, false
 }
 
 func uniqueSorted(working []endpointResult, key func(endpointResult) string, flagFor func(string) string) string {
@@ -415,16 +422,26 @@ func uniqueSorted(working []endpointResult, key func(endpointResult) string, fla
 }
 
 func writeSubnetPicks(w io.Writer, working []endpointResult) {
-	fmt.Fprintln(w, "\n  ── Best working endpoint per subnet (lowest ping) ──")
+	type line struct {
+		text    string
+		latency time.Duration
+	}
+	var lines []line
 	for _, base := range pools {
 		picks := subnetEndpoints(working, base)
 		subnet := base + "0/24"
 		if len(picks) == 0 {
-			fmt.Fprintf(w, "  %-18s %s\n", subnet, "no working endpoints")
+			lines = append(lines, line{fmt.Sprintf("  %-18s %s", subnet, "no working endpoints"), 0})
 			continue
 		}
 		r := bestByPing(picks)
-		fmt.Fprintf(w, "  %-18s %-22s %-8s %-10s %s\n", subnet, r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit))
+		lines = append(lines, line{fmt.Sprintf("  %-18s %-22s %-8s %-10s %s", subnet, r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit)), r.latency})
+	}
+	sort.SliceStable(lines, func(i, j int) bool { return lessDur(lines[i].latency, lines[j].latency) })
+
+	fmt.Fprintln(w, "\n  ── Best working endpoint per subnet (lowest ping) ──")
+	for _, l := range lines {
+		fmt.Fprintln(w, l.text)
 	}
 }
 
