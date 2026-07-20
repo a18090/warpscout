@@ -148,12 +148,12 @@ func TestExpandPools(t *testing.T) {
 
 func TestFlagEmoji(t *testing.T) {
 	cases := map[string]string{
-		"RU": "\U0001F1F7\U0001F1FA",
-		"de": "\U0001F1E9\U0001F1EA", // case-insensitive
-		"?":  "",                     // missing field
-		"":   "",
+		"RU":  "\U0001F1F7\U0001F1FA",
+		"de":  "\U0001F1E9\U0001F1EA", // case-insensitive
+		"?":   "",                     // missing field
+		"":    "",
 		"USA": "", // not two letters
-		"R1": "", // digit
+		"R1":  "", // digit
 	}
 	for in, want := range cases {
 		if got := flagEmoji(in); got != want {
