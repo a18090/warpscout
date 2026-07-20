@@ -10,6 +10,9 @@ import (
 	"net/netip"
 	"sync"
 	"time"
+
+	"golang.org/x/net/icmp"
+	"golang.org/x/net/ipv4"
 )
 
 const traceURL = "https://cloudflare.com/cdn-cgi/trace"
@@ -105,6 +108,90 @@ func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout tim
 		}
 	}
 	return ports, nil
+}
+
+const (
+	pingProbes = 3
+	pingID     = 0xbeef
+)
+
+// pingHost sends pingProbes ICMP echoes from the host directly to addr (no
+// tunnel) and returns the average round-trip time over the probes that came
+// back. ok is false when ICMP can't be opened (no permission) or every probe is
+// lost - the endpoint then keeps an unknown ping rather than being dropped.
+//
+// ponytail: unprivileged "udp4" ICMP works on Linux when net.ipv4.ping_group_range
+// permits it; on failure the endpoint just shows "?", not an error.
+func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
+	conn, dst := listenPing(addr)
+	if conn == nil {
+		return 0, false
+	}
+	defer conn.Close()
+
+	var total time.Duration
+	got := 0
+	buf := make([]byte, 1500)
+	for seq := 0; seq < pingProbes; seq++ {
+		if rtt, ok := pingHostOnce(conn, dst, seq, buf, timeout); ok {
+			total += rtt
+			got++
+		}
+	}
+	if got == 0 {
+		return 0, false
+	}
+	return total / time.Duration(got), true
+}
+
+// listenPing opens an ICMP socket, preferring the unprivileged datagram socket
+// and falling back to a raw socket where the datagram one is disabled (e.g.
+// ping_group_range is empty, the Debian default - a raw socket then works under
+// root / CAP_NET_RAW). dst is the address type the chosen socket expects. Returns
+// a nil conn when neither can be opened.
+func listenPing(addr netip.Addr) (*icmp.PacketConn, net.Addr) {
+	if conn, err := icmp.ListenPacket("udp4", "0.0.0.0"); err == nil {
+		return conn, &net.UDPAddr{IP: addr.AsSlice()}
+	}
+	if conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0"); err == nil {
+		return conn, &net.IPAddr{IP: addr.AsSlice()}
+	}
+	return nil, nil
+}
+
+// pingHostOnce sends one echo to dst and waits for the matching reply, reading
+// past any stray ICMP traffic until the deadline. rtt is meaningful only when
+// got is true.
+func pingHostOnce(conn *icmp.PacketConn, dst net.Addr, seq int, buf []byte, timeout time.Duration) (time.Duration, bool) {
+	msg := icmp.Message{
+		Type: ipv4.ICMPTypeEcho,
+		Body: &icmp.Echo{ID: pingID, Seq: seq, Data: []byte("warpscout")},
+	}
+	wire, err := msg.Marshal(nil)
+	if err != nil {
+		return 0, false
+	}
+	start := time.Now()
+	if _, err := conn.WriteTo(wire, dst); err != nil {
+		return 0, false
+	}
+
+	deadline := start.Add(timeout)
+	conn.SetReadDeadline(deadline)
+	for {
+		n, _, err := conn.ReadFrom(buf)
+		if err != nil {
+			return 0, false
+		}
+		reply, err := icmp.ParseMessage(ipv4.ICMPTypeEchoReply.Protocol(), buf[:n])
+		if err != nil {
+			continue
+		}
+		// "udp4" ICMP rewrites the ID, so match on the echoed sequence only.
+		if echo, ok := reply.Body.(*icmp.Echo); ok && reply.Type == ipv4.ICMPTypeEchoReply && echo.Seq == seq {
+			return time.Since(start), true
+		}
+	}
 }
 
 // sampleAddrs returns up to n random addresses from ips (all of them if n covers

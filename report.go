@@ -3,21 +3,34 @@ package main
 import (
 	"fmt"
 	"io"
-	"math/rand"
 	"net/netip"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // endpointResult is the outcome of the full check for one IP.
 type endpointResult struct {
 	ip       netip.Addr
-	endpoint string      // ip:port that completed the handshake
-	exit     traceResult // phase 2: real exit seen through the tunnel
-	ok       bool        // handshake + trace through the tunnel succeeded
-	durable  bool        // survived the re-probe (meaningful only when ok)
+	endpoint string        // ip:port that completed the handshake
+	exit     traceResult   // phase 2: real exit seen through the tunnel
+	latency  time.Duration // direct host ICMP RTT to ip; 0 means unknown
+	ok       bool          // handshake + trace through the tunnel succeeded
+	durable  bool          // survived the re-probe (meaningful only when ok)
+}
+
+// pingStr renders the latency as "47ms" ("0.4ms" below 1ms, common from a
+// datacenter next to the edge), or "?" when it is unknown (0).
+func (r endpointResult) pingStr() string {
+	if r.latency <= 0 {
+		return "?"
+	}
+	if r.latency < time.Millisecond {
+		return fmt.Sprintf("%.2fms", float64(r.latency)/float64(time.Millisecond))
+	}
+	return fmt.Sprintf("%dms", r.latency.Milliseconds())
 }
 
 // working is a durable endpoint; flaky passed once but died on the re-probe
@@ -84,13 +97,33 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 			out = append(out, r)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].exit.colo != out[j].exit.colo {
-			return out[i].exit.colo < out[j].exit.colo
-		}
-		return out[i].endpoint < out[j].endpoint
-	})
+	sort.Slice(out, func(i, j int) bool { return lessByPing(out[i], out[j]) })
 	return out
+}
+
+// lessByPing orders by latency ascending with unknown (0) pings last, breaking
+// ties on the endpoint string for a stable order.
+func lessByPing(a, b endpointResult) bool {
+	ap, bp := a.latency, b.latency
+	if (ap <= 0) != (bp <= 0) {
+		return ap > 0 // known ping sorts before unknown
+	}
+	if ap != bp {
+		return ap < bp
+	}
+	return a.endpoint < b.endpoint
+}
+
+// bestByPing returns the lowest-ping endpoint (unknown pings last). picks must
+// be non-empty.
+func bestByPing(picks []endpointResult) endpointResult {
+	best := picks[0]
+	for _, r := range picks[1:] {
+		if lessByPing(r, best) {
+			best = r
+		}
+	}
+	return best
 }
 
 func writeHeader(w io.Writer, working, probed int) {
@@ -121,18 +154,12 @@ func writeFullReport(w io.Writer, results []endpointResult) {
 		if len(subnet) == 0 && len(subnetFlaky) == 0 {
 			continue
 		}
-		fmt.Fprintf(w, "\n  ── %s0/24 ──\n", base)
-		for _, colo := range exitColos(subnet) {
-			fmt.Fprintf(w, "    %s\n", colo)
-			for _, r := range subnet {
-				if regionColo(r.exit) != colo {
-					continue
-				}
-				fmt.Fprintf(w, "      %s\n", r.endpoint)
-			}
+		fmt.Fprintf(w, "\n  ── %s0/24 ──  (sorted by ping)\n", base)
+		for _, r := range subnet {
+			fmt.Fprintf(w, "    %-22s %-8s %s\n", r.endpoint, r.pingStr(), regionColo(r.exit))
 		}
 		for _, r := range subnetFlaky {
-			fmt.Fprintf(w, "    %-22s %-10s %s\n", r.endpoint, regionColo(r.exit), "flaky")
+			fmt.Fprintf(w, "    %-22s %-8s %-10s %s\n", r.endpoint, r.pingStr(), regionColo(r.exit), "flaky")
 		}
 	}
 
@@ -150,22 +177,6 @@ func subnetEndpoints(working []endpointResult, base string) []endpointResult {
 		}
 	}
 	return picks
-}
-
-// exitColos returns the distinct phase-2 region/colo values in the group, sorted.
-func exitColos(picks []endpointResult) []string {
-	seen := make(map[string]struct{})
-	var colos []string
-	for _, r := range picks {
-		colo := regionColo(r.exit)
-		if _, ok := seen[colo]; ok {
-			continue
-		}
-		seen[colo] = struct{}{}
-		colos = append(colos, colo)
-	}
-	sort.Strings(colos)
-	return colos
 }
 
 // writeConsole prints a colored, framed summary to the terminal: a banner with
@@ -226,39 +237,48 @@ func writeBox(w io.Writer, pal palette, plain, body string) {
 const (
 	colSubnet   = 16
 	colEndpoint = 22
+	colPing     = 7
 	colExit     = 16
 )
 
-// writePicksTable prints a boxed table of one random endpoint per subnet: a
+// writePicksTable prints a boxed table of the lowest-ping endpoint per subnet: a
 // durable one when available, otherwise a flaky one flagged in yellow.
 func writePicksTable(w io.Writer, pal palette, working, flaky []endpointResult) {
 	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
+	widths := []int{colSubnet, colEndpoint, colPing, colExit}
 	border := func(l, m, r string) string {
-		return l + strings.Repeat("─", colSubnet+2) + m + strings.Repeat("─", colEndpoint+2) + m +
-			strings.Repeat("─", colExit+2) + r
+		parts := make([]string, len(widths))
+		for i, n := range widths {
+			parts[i] = strings.Repeat("─", n+2)
+		}
+		return l + strings.Join(parts, m) + r
 	}
-	row := func(a, b, c string) string {
+	row := func(cells ...string) string {
 		bar := pal.dim("│")
-		return fmt.Sprintf("  %s %s %s %s %s %s %s", bar, a, bar, b, bar, c, bar)
+		out := "  " + bar
+		for _, c := range cells {
+			out += " " + c + " " + bar
+		}
+		return out
 	}
 
-	fmt.Fprintln(w, "\n  "+pal.title("Working endpoint per subnet"))
+	fmt.Fprintln(w, "\n  "+pal.title("Best endpoint per subnet (lowest ping)"))
 	fmt.Fprintln(w, "  "+pal.dim(border("┌", "┬", "┐")))
-	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("EXIT", colExit))))
+	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("PING", colPing)), pal.title(pad("EXIT", colExit))))
 	fmt.Fprintln(w, "  "+pal.dim(border("├", "┼", "┤")))
 	for _, base := range pools {
 		subnet := pad(base+"0/24", colSubnet)
 		if picks := subnetEndpoints(working, base); len(picks) > 0 {
-			r := picks[rand.Intn(len(picks))]
-			fmt.Fprintln(w, row(subnet, pal.addr(pad(r.endpoint, colEndpoint)), pal.accent(pad(regionColo(r.exit), colExit))))
+			r := bestByPing(picks)
+			fmt.Fprintln(w, row(subnet, pal.addr(pad(r.endpoint, colEndpoint)), pal.accent(pad(r.pingStr(), colPing)), pal.accent(pad(regionColo(r.exit), colExit))))
 			continue
 		}
 		if picks := subnetEndpoints(flaky, base); len(picks) > 0 {
-			r := picks[rand.Intn(len(picks))]
-			fmt.Fprintln(w, row(subnet, pal.warn(pad(r.endpoint, colEndpoint)), pal.warn(pad("flaky", colExit))))
+			r := bestByPing(picks)
+			fmt.Fprintln(w, row(subnet, pal.warn(pad(r.endpoint, colEndpoint)), pal.warn(pad(r.pingStr(), colPing)), pal.warn(pad("flaky", colExit))))
 			continue
 		}
-		fmt.Fprintln(w, row(subnet, pal.fail(pad("no working endpoints", colEndpoint)), pad("", colExit)))
+		fmt.Fprintln(w, row(subnet, pal.fail(pad("no working endpoints", colEndpoint)), pad("", colPing), pad("", colExit)))
 	}
 	fmt.Fprintln(w, "  "+pal.dim(border("└", "┴", "┘")))
 }
@@ -293,7 +313,7 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
 	fmt.Fprintln(w)
 
 	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
-	widths := []int{colSubnet, colProto, colProto, colEndpoint, colExit}
+	widths := []int{colSubnet, colProto, colProto, colEndpoint, colPing, colExit}
 	border := func(l, m, r string) string {
 		parts := make([]string, len(widths))
 		for i, n := range widths {
@@ -322,39 +342,42 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, pal palette) {
 	fmt.Fprintln(w, "  "+pal.title("WireGuard vs AmneziaWG per subnet"))
 	fmt.Fprintln(w, "  "+pal.dim(border("┌", "┬", "┐")))
 	fmt.Fprintln(w, row(pal.title(pad("SUBNET", colSubnet)), pal.title(pad("WG", colProto)), pal.title(pad("AWG", colProto)),
-		pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("EXIT", colExit))))
+		pal.title(pad("ENDPOINT", colEndpoint)), pal.title(pad("PING", colPing)), pal.title(pad("EXIT", colExit))))
 	fmt.Fprintln(w, "  "+pal.dim(border("├", "┼", "┤")))
 	for _, base := range pools {
 		subnet := pad(base+"0/24", colSubnet)
 		wgCell := statusCell(wgWork, wgFlaky, base)
 		awgCell := statusCell(awgWork, awgFlaky, base)
-		endpoint, exit, flaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
+		endpoint, ping, exit, flaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
 		if endpoint == "" {
-			fmt.Fprintln(w, row(subnet, wgCell, awgCell, pal.dim(pad("-", colEndpoint)), pad("", colExit)))
+			fmt.Fprintln(w, row(subnet, wgCell, awgCell, pal.dim(pad("-", colEndpoint)), pad("", colPing), pad("", colExit)))
 			continue
 		}
 		endpointCell := pal.addr(pad(endpoint, colEndpoint))
+		pingCell := pal.accent(pad(ping, colPing))
 		exitCell := pal.accent(pad(exit, colExit))
 		if flaky {
 			endpointCell = pal.warn(pad(endpoint, colEndpoint))
+			pingCell = pal.warn(pad(ping, colPing))
 			exitCell = pal.warn(pad(exit, colExit))
 		}
-		fmt.Fprintln(w, row(subnet, wgCell, awgCell, endpointCell, exitCell))
+		fmt.Fprintln(w, row(subnet, wgCell, awgCell, endpointCell, pingCell, exitCell))
 	}
 	fmt.Fprintln(w, "  "+pal.dim(border("└", "┴", "┘")))
 }
 
 // bestPick returns one endpoint to use for a subnet, preferring a durable wg one,
-// then durable awg, then flaky wg, then flaky awg. flaky reports whether the
-// chosen endpoint is only flaky. Empty endpoint means nothing worked.
-func bestPick(base string, sets ...[]endpointResult) (endpoint, exit string, flaky bool) {
+// then durable awg, then flaky wg, then flaky awg; within the chosen set it picks
+// the lowest ping. flaky reports whether the chosen endpoint is only flaky. Empty
+// endpoint means nothing worked.
+func bestPick(base string, sets ...[]endpointResult) (endpoint, ping, exit string, flaky bool) {
 	for i, set := range sets {
 		if picks := subnetEndpoints(set, base); len(picks) > 0 {
-			r := picks[rand.Intn(len(picks))]
-			return r.endpoint, regionColo(r.exit), i >= 2 // sets[2:] are the flaky lists
+			r := bestByPing(picks)
+			return r.endpoint, r.pingStr(), regionColo(r.exit), i >= 2 // sets[2:] are the flaky lists
 		}
 	}
-	return "", "", false
+	return "", "", "", false
 }
 
 // uniqueSorted collects the non-empty key(r) values, sorted, each rendered with
@@ -377,10 +400,10 @@ func uniqueSorted(working []endpointResult, key func(endpointResult) string, fla
 	return strings.Join(vals, "  ")
 }
 
-// writeSubnetPicks prints one random working endpoint per subnet, with its real
-// (phase-2) region/colo, so one can be grabbed quickly per pool.
+// writeSubnetPicks prints the lowest-ping working endpoint per subnet, with its
+// ping and real (phase-2) region/colo, so the best one can be grabbed per pool.
 func writeSubnetPicks(w io.Writer, working []endpointResult) {
-	fmt.Fprintln(w, "\n  ── One random working endpoint per subnet ──")
+	fmt.Fprintln(w, "\n  ── Best working endpoint per subnet (lowest ping) ──")
 	for _, base := range pools {
 		picks := subnetEndpoints(working, base)
 		subnet := base + "0/24"
@@ -388,8 +411,8 @@ func writeSubnetPicks(w io.Writer, working []endpointResult) {
 			fmt.Fprintf(w, "  %-18s %s\n", subnet, "no working endpoints")
 			continue
 		}
-		r := picks[rand.Intn(len(picks))]
-		fmt.Fprintf(w, "  %-18s %-22s %s\n", subnet, r.endpoint, regionColo(r.exit))
+		r := bestByPing(picks)
+		fmt.Fprintf(w, "  %-18s %-22s %-8s %s\n", subnet, r.endpoint, r.pingStr(), regionColo(r.exit))
 	}
 }
 

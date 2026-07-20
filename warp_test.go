@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/curve25519"
 )
@@ -54,6 +55,24 @@ func TestDurableVerdict(t *testing.T) {
 		if got := durableVerdict(c.results); got != c.want {
 			t.Errorf("%s: durableVerdict(%v) = %v, want %v", c.name, c.results, got, c.want)
 		}
+	}
+}
+
+func TestBestByPing(t *testing.T) {
+	mk := func(ep string, ms int) endpointResult {
+		return endpointResult{endpoint: ep, latency: time.Duration(ms) * time.Millisecond}
+	}
+
+	// Lowest known ping wins; the 0 (unknown) must not be treated as fastest.
+	picks := []endpointResult{mk("a", 0), mk("b", 90), mk("c", 40)}
+	if got := bestByPing(picks); got.endpoint != "c" {
+		t.Errorf("bestByPing = %q, want c (40ms)", got.endpoint)
+	}
+
+	// All unknown: fall back to the first.
+	allUnknown := []endpointResult{mk("x", 0), mk("y", 0)}
+	if got := bestByPing(allUnknown); got.endpoint != "x" {
+		t.Errorf("bestByPing(all unknown) = %q, want x", got.endpoint)
 	}
 }
 

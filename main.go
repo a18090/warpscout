@@ -7,6 +7,10 @@ import (
 	"time"
 )
 
+// pingWorkers bounds the post-scan latency pass. Host ICMP is cheap and tunnel-
+// independent, so it runs much wider than phase 2's tunnel pool.
+const pingWorkers = 50
+
 func main() {
 	opts := parseFlags()
 
@@ -113,6 +117,21 @@ func main() {
 		}
 		p2.stop(errPal.ok("done"))
 		phases = append(phases, phaseResult{run, results})
+	}
+
+	// Ping each working endpoint directly from the host (no tunnel), so tables
+	// and the report can rank by latency. Independent of the tunnel and cheap, so
+	// it runs at a wider concurrency than phase 2.
+	for pi := range phases {
+		res := phases[pi].results
+		runPool(pingWorkers, len(res), func(i int) {
+			if !res[i].ok {
+				return
+			}
+			if rtt, ok := pingHost(res[i].ip, timeout); ok {
+				res[i].latency = rtt
+			}
+		})
 	}
 
 	coloISO = resolveColoISO(ctx, exitColosOf(phases))
