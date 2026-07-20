@@ -7,9 +7,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// TestScanModelFeed checks the two bits of custom logic in the scan model: the
-// live feed stays sorted by ping (lowest first), the bar counts probes, and
-// doneMsg ends the program.
 func TestScanModelFeed(t *testing.T) {
 	var m tea.Model = newScanModel(nil)
 
@@ -18,7 +15,7 @@ func TestScanModelFeed(t *testing.T) {
 	step(barBeginMsg{label: "Phase 2", total: 3})
 	step(foundMsg{endpoint: "a:2408", latency: 50 * time.Millisecond})
 	step(foundMsg{endpoint: "b:2408", latency: 20 * time.Millisecond})
-	step(foundMsg{endpoint: "c:2408", latency: 0}) // unknown ping sorts last
+	step(foundMsg{endpoint: "c:2408", latency: 0})
 	step(probedMsg{})
 	step(probedMsg{})
 	step(probedMsg{})

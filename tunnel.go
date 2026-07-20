@@ -16,22 +16,18 @@ import (
 	"golang.org/x/net/ipv4"
 )
 
-// cloudflareIP is dialed through the tunnel for the trace request, avoiding any
-// in-tunnel DNS. TLS SNI stays cloudflare.com so the certificate verifies.
 const cloudflareIP = "1.1.1.1:443"
 
-// tunnel is a persistent userspace WireGuard device reused across many IPs. The
-// gvisor stack behind netstack.CreateNetTUN is never freed by the library
-// (netTun.Close only RemoveNIC), so creating one per IP leaks and OOMs. Reusing
-// a fixed pool of tunnels and swapping only the peer endpoint bounds live stacks
-// to the worker count.
+// The gvisor stack behind netstack.CreateNetTUN is never freed by the library
+// (netTun.Close only RemoveNIC), so one tunnel per IP leaks and OOMs. Tunnels
+// are pooled and only the peer endpoint is swapped, bounding live stacks to the
+// worker count.
 type tunnel struct {
 	dev    *device.Device
 	tnet   *netstack.Net
 	client *http.Client
 }
 
-// newTunnel brings up one device with the interface config applied once.
 func newTunnel(awg bool) (*tunnel, error) {
 	base, err := baseUAPI(awg)
 	if err != nil {
@@ -55,8 +51,6 @@ func newTunnel(awg bool) (*tunnel, error) {
 	}
 
 	transport := &http.Transport{
-		// Fresh connection each request so no TCP state from a previous endpoint
-		// carries over after the peer is swapped.
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			return tnet.DialContext(ctx, "tcp", cloudflareIP)
@@ -67,10 +61,6 @@ func newTunnel(awg bool) (*tunnel, error) {
 
 func (t *tunnel) Close() { t.dev.Close() }
 
-// trace points the tunnel at ip (trying each candidate port in order), confirms
-// the handshake by fetching /cdn-cgi/trace through it, and returns the real exit
-// colo. endpoint is the ip:port that worked. durable reports whether the tunnel
-// survived the re-probe (see traceEndpoint); it is meaningful only when ok.
 func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int) (tr traceResult, endpoint string, ok, durable bool) {
 	for _, port := range warpPorts {
 		endpoint = fmt.Sprintf("%s:%d", ip, port)
@@ -81,9 +71,6 @@ func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration
 	return traceResult{}, endpoint, false, false
 }
 
-// connect points the tunnel at ip (first candidate port that completes a
-// handshake) without fetching anything, so the caller can send its own traffic
-// (e.g. the registration requests) through t.tnet.
 func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Duration) bool {
 	for _, port := range warpPorts {
 		if t.handshake(ctx, fmt.Sprintf("%s:%d", ip, port), timeout) {
@@ -93,10 +80,6 @@ func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Durati
 	return false
 }
 
-// handshake points the peer at endpoint (ip:port) and reports whether a
-// WireGuard handshake completes. It is the only reliable reachability test for a
-// WARP UDP port: the endpoint stays silent to any packet without a valid
-// handshake, so there is no lighter (netcat-style) probe.
 func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Duration) bool {
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
@@ -108,11 +91,6 @@ func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Du
 	return waitHandshake(ctx, t.dev, timeout)
 }
 
-// traceEndpoint brings the peer up and fetches the trace. When pings > 0 it then
-// pings through the same established session to catch the delayed drop:
-// censorship gear (TSPU) lets a WireGuard handshake and a few packets through,
-// then drops the flagged peer, so a single fetch is a false positive. durable is
-// meaningful only when ok (the initial fetch succeeded).
 func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int) (tr traceResult, durable, ok bool) {
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
@@ -122,9 +100,8 @@ func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout tim
 		return traceResult{}, false, false
 	}
 
-	// persistent_keepalive triggers a handshake initiation. Wait for it to
-	// complete before sending traffic, otherwise the first TCP SYN is dropped by
-	// the not-yet-established peer and netstack stalls past the timeout.
+	// Wait for the handshake before sending traffic, otherwise the first TCP SYN
+	// is dropped by the not-yet-established peer and netstack stalls past timeout.
 	if !waitHandshake(ctx, t.dev, timeout) {
 		return traceResult{}, false, false
 	}
@@ -139,7 +116,6 @@ func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout tim
 	return parseTrace(body), t.pingDurable(pings, timeout), true
 }
 
-// fetch does one trace request through the currently established peer.
 func (t *tunnel) fetch(ctx context.Context, timeout time.Duration) (string, bool) {
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -153,14 +129,6 @@ const (
 	durabilityPings = 10
 )
 
-// pingDurable sends up to count ICMP echoes through the established tunnel to
-// 1.1.1.1 and returns whether every one round-tripped. A censored (TSPU-dropped)
-// peer passes the first few packets, then dies on data volume and never
-// recovers, so any lost reply means flaky - it stops early on the first loss.
-//
-// ponytail: falls back to durable=true if ICMP can't be set up at all, so an
-// endpoint whose data path already proved good via the TCP trace is never
-// downgraded just because the ping socket failed to open.
 func (t *tunnel) pingDurable(count int, timeout time.Duration) bool {
 	dst := netip.MustParseAddr(pingTarget)
 	pc, err := t.tnet.DialPingAddr(netip.Addr{}, dst)
@@ -177,14 +145,12 @@ func (t *tunnel) pingDurable(count int, timeout time.Duration) bool {
 		}
 		results = append(results, t.pingOnce(pc, seq, buf, timeout))
 		if !durableVerdict(results) {
-			return false // a reply was lost, stop early
+			return false
 		}
 	}
 	return true
 }
 
-// durableVerdict reports whether every ping so far round-tripped. A single lost
-// reply means the peer is dying on data volume (flaky), so it is not tolerated.
 func durableVerdict(results []bool) bool {
 	for _, ok := range results {
 		if !ok {
@@ -194,7 +160,6 @@ func durableVerdict(results []bool) bool {
 	return true
 }
 
-// pingOnce sends one echo and reports whether a reply came back within timeout.
 func (t *tunnel) pingOnce(pc *netstack.PingConn, seq int, buf []byte, timeout time.Duration) bool {
 	msg := icmp.Message{
 		Type: ipv4.ICMPTypeEcho,
@@ -212,8 +177,6 @@ func (t *tunnel) pingOnce(pc *netstack.PingConn, seq int, buf []byte, timeout ti
 	return err == nil
 }
 
-// waitHandshake polls the device until the peer reports a completed handshake
-// or the timeout elapses.
 func waitHandshake(ctx context.Context, dev *device.Device, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -229,8 +192,6 @@ func waitHandshake(ctx context.Context, dev *device.Device, timeout time.Duratio
 	return false
 }
 
-// handshakeDone reports whether the UAPI dump contains a non-zero
-// last_handshake_time_sec.
 func handshakeDone(conf string) bool {
 	const key = "last_handshake_time_sec="
 	for _, line := range strings.Split(conf, "\n") {

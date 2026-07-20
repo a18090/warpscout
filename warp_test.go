@@ -69,13 +69,11 @@ func TestBestByPing(t *testing.T) {
 		return endpointResult{endpoint: ep, latency: time.Duration(ms) * time.Millisecond}
 	}
 
-	// Lowest known ping wins; the 0 (unknown) must not be treated as fastest.
 	picks := []endpointResult{mk("a", 0), mk("b", 90), mk("c", 40)}
 	if got := bestByPing(picks); got.endpoint != "c" {
 		t.Errorf("bestByPing = %q, want c (40ms)", got.endpoint)
 	}
 
-	// All unknown: fall back to the first.
 	allUnknown := []endpointResult{mk("x", 0), mk("y", 0)}
 	if got := bestByPing(allUnknown); got.endpoint != "x" {
 		t.Errorf("bestByPing(all unknown) = %q, want x", got.endpoint)
@@ -188,11 +186,11 @@ func TestExpandPools(t *testing.T) {
 func TestFlagEmoji(t *testing.T) {
 	cases := map[string]string{
 		"RU":  "\U0001F1F7\U0001F1FA",
-		"de":  "\U0001F1E9\U0001F1EA", // case-insensitive
-		"?":   "",                     // missing field
+		"de":  "\U0001F1E9\U0001F1EA",
+		"?":   "",
 		"":    "",
-		"USA": "", // not two letters
-		"R1":  "", // digit
+		"USA": "",
+		"R1":  "",
 	}
 	for in, want := range cases {
 		if got := flagEmoji(in); got != want {

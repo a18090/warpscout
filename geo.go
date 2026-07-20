@@ -9,18 +9,12 @@ import (
 	"strings"
 )
 
-// coloISO maps an IATA colo code to its ISO 3166 alpha-2 country, resolved once
-// per run (resolveColoISO) and read while rendering. Nil-safe: a miss yields no
-// flag. Package-level like errPal - single run, single writer.
 var coloISO map[string]string
 
-// coloFlag returns the flag emoji for a colo's country, or "" if unknown.
 func coloFlag(colo string) string { return flagEmoji(coloISO[colo]) }
 
-const regionalIndicatorA = 0x1F1E6 // 🇦
+const regionalIndicatorA = 0x1F1E6
 
-// flagEmoji maps a 2-letter ISO country code to its regional-indicator flag.
-// Returns "" for anything that isn't exactly two ASCII letters ("?", "", junk).
 func flagEmoji(iso string) string {
 	if len(iso) != 2 {
 		return ""
@@ -41,8 +35,6 @@ const (
 	airPortCodesRef = "https://www.air-port-codes.com/"
 )
 
-// resolveColoISO looks up the country of every unique, non-empty colo. Sequential
-// (a handful of colos per run); a failed lookup is simply left out of the map.
 func resolveColoISO(ctx context.Context, colos []string) map[string]string {
 	client := &http.Client{Timeout: registerTimeout}
 	out := make(map[string]string)
@@ -60,8 +52,6 @@ func resolveColoISO(ctx context.Context, colos []string) map[string]string {
 	return out
 }
 
-// iataISO returns the ISO country of an IATA airport code via the air-port-codes
-// API (ported from the bash get_iata_location). "" on any failure.
 func iataISO(ctx context.Context, client *http.Client, iata string) string {
 	body := strings.NewReader(url.Values{"iata": {iata}}.Encode())
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, airPortCodesURL, body)

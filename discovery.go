@@ -17,14 +17,9 @@ import (
 
 const traceURL = "https://cloudflare.com/cdn-cgi/trace"
 
-// discoverColo makes a direct HTTPS request to Cloudflare's edge with the
-// connection forced to ip (equivalent to curl --resolve), reporting which edge
-// colo answers for that IP without any tunnel. Used by discoverAlive to find
-// live endpoints for the registration fallback.
 func discoverColo(ctx context.Context, ip netip.Addr, timeout time.Duration) (traceResult, bool) {
 	dialer := &net.Dialer{Timeout: timeout}
 	transport := &http.Transport{
-		// Ignore the requested host, always dial the pool IP on 443.
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 			return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), "443"))
 		},
@@ -39,7 +34,6 @@ func discoverColo(ctx context.Context, ip netip.Addr, timeout time.Duration) (tr
 	return t, t.colo != ""
 }
 
-// fetchTrace performs the GET and returns the body text.
 func fetchTrace(ctx context.Context, client *http.Client, url string) (string, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -57,12 +51,8 @@ func fetchTrace(ctx context.Context, client *http.Client, url string) (string, b
 	return string(body), true
 }
 
-// portProbeSample is how many pool IPs phase 1 tries before deciding a port is
-// blocked. A reachable network is confirmed on the first live endpoint; only a
-// fully blocked network pays the whole sample.
 const portProbeSample = 12
 
-// anyAWG reports whether any run uses AmneziaWG.
 func anyAWG(runs []protoRun) bool {
 	for _, r := range runs {
 		if r.awg {
@@ -72,16 +62,6 @@ func anyAWG(runs []protoRun) bool {
 	return false
 }
 
-// reachablePorts is phase 1: it finds which WARP ports a WireGuard handshake
-// reaches on this network. A completed handshake is enough - it proves the port
-// is open and basic connectivity exists. Whether data then survives is the
-// protocol's job (plain wg may die where AmneziaWG's obfuscation gets through),
-// decided per-endpoint in phase 2, so phase 1 stays a cheap handshake probe. It
-// walks a sample of pool IPs until one endpoint handshakes on any port - that
-// endpoint is reachable, so the ports it answers on are the ones the network
-// lets through and the ports it stays silent on are blocked (a live WARP
-// endpoint listens on all of warpPorts). Returns the reachable subset of
-// warpPorts in their original order, or empty if nothing got through.
 func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, sample int) ([]int, error) {
 	tn, err := newTunnel(awg)
 	if err != nil {
@@ -97,7 +77,7 @@ func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout tim
 			}
 		}
 		if len(open) > 0 {
-			break // this endpoint is reachable; open now holds the network's ports
+			break
 		}
 	}
 
@@ -115,13 +95,6 @@ const (
 	pingID     = 0xbeef
 )
 
-// pingHost sends pingProbes ICMP echoes from the host directly to addr (no
-// tunnel) and returns the average round-trip time over the probes that came
-// back. ok is false when ICMP can't be opened (no permission) or every probe is
-// lost - the endpoint then keeps an unknown ping rather than being dropped.
-//
-// ponytail: unprivileged "udp4" ICMP works on Linux when net.ipv4.ping_group_range
-// permits it; on failure the endpoint just shows "?", not an error.
 func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
 	conn, dst := listenPing(addr)
 	if conn == nil {
@@ -144,11 +117,6 @@ func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
 	return total / time.Duration(got), true
 }
 
-// listenPing opens an ICMP socket, preferring the unprivileged datagram socket
-// and falling back to a raw socket where the datagram one is disabled (e.g.
-// ping_group_range is empty, the Debian default - a raw socket then works under
-// root / CAP_NET_RAW). dst is the address type the chosen socket expects. Returns
-// a nil conn when neither can be opened.
 func listenPing(addr netip.Addr) (*icmp.PacketConn, net.Addr) {
 	if conn, err := icmp.ListenPacket("udp4", "0.0.0.0"); err == nil {
 		return conn, &net.UDPAddr{IP: addr.AsSlice()}
@@ -159,9 +127,6 @@ func listenPing(addr netip.Addr) (*icmp.PacketConn, net.Addr) {
 	return nil, nil
 }
 
-// pingHostOnce sends one echo to dst and waits for the matching reply, reading
-// past any stray ICMP traffic until the deadline. rtt is meaningful only when
-// got is true.
 func pingHostOnce(conn *icmp.PacketConn, dst net.Addr, seq int, buf []byte, timeout time.Duration) (time.Duration, bool) {
 	msg := icmp.Message{
 		Type: ipv4.ICMPTypeEcho,
@@ -194,8 +159,6 @@ func pingHostOnce(conn *icmp.PacketConn, dst net.Addr, seq int, buf []byte, time
 	}
 }
 
-// sampleAddrs returns up to n random addresses from ips (all of them if n covers
-// the slice), so phase 1 spreads its probes rather than hitting one dead subnet.
 func sampleAddrs(ips []netip.Addr, n int) []netip.Addr {
 	if n <= 0 || n >= len(ips) {
 		return ips
@@ -207,9 +170,6 @@ func sampleAddrs(ips []netip.Addr, n int) []netip.Addr {
 	return out
 }
 
-// discoverAlive scans ips and returns up to want edge-responsive ones, stopping
-// early once enough are found (cheaper than a full phase 1 just to bootstrap the
-// registration tunnel).
 func discoverAlive(ctx context.Context, ips []netip.Addr, workers int, timeout time.Duration, want int) []netip.Addr {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()

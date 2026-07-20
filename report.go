@@ -14,8 +14,6 @@ import (
 	"github.com/charmbracelet/lipgloss/table"
 )
 
-// Palette colors shared by the console tables and the live TUI, so both read as
-// one design.
 var (
 	dimColor    = lipgloss.Color("240")
 	okColor     = lipgloss.Color("42")
@@ -24,8 +22,6 @@ var (
 	accentColor = lipgloss.Color("39")
 )
 
-// conStyles bundles the styles for one output, built from a renderer bound to a
-// specific writer so color degrades automatically on a non-TTY (pipe/NO_COLOR).
 type conStyles struct {
 	title, dim, ok, fail, warn, accent, box, cell lipgloss.Style
 }
@@ -43,29 +39,23 @@ func newConStyles(r *lipgloss.Renderer) conStyles {
 	}
 }
 
-// Row status used by the table StyleFunc to color a pick.
 const (
 	statusOK = iota
 	statusFlaky
 	statusNone
 )
 
-// endpointResult is the outcome of the full check for one IP.
 type endpointResult struct {
 	ip       netip.Addr
-	endpoint string        // ip:port that completed the handshake
-	exit     traceResult   // phase 2: real exit seen through the tunnel
-	latency  time.Duration // direct host ICMP RTT to ip; 0 means unknown
-	ok       bool          // handshake + trace through the tunnel succeeded
-	durable  bool          // survived the re-probe (meaningful only when ok)
+	endpoint string
+	exit     traceResult
+	latency  time.Duration
+	ok       bool
+	durable  bool
 }
 
-// pingStr renders the latency as "47ms" ("0.4ms" below 1ms, common from a
-// datacenter next to the edge), or "?" when it is unknown (0).
 func (r endpointResult) pingStr() string { return latencyStr(r.latency) }
 
-// latencyStr renders a latency as "47ms" ("0.4ms" below 1ms), or "?" when it is
-// unknown (0). Shared by the report tables and the live TUI feed.
 func latencyStr(d time.Duration) string {
 	if d <= 0 {
 		return "?"
@@ -76,13 +66,9 @@ func latencyStr(d time.Duration) string {
 	return fmt.Sprintf("%dms", d.Milliseconds())
 }
 
-// working is a durable endpoint; flaky passed once but died on the re-probe
-// (TSPU dropped the peer after a few packets).
 func (r endpointResult) working() bool { return r.ok && r.durable }
 func (r endpointResult) flaky() bool   { return r.ok && !r.durable }
 
-// withFlag prefixes code with its flag emoji ("🇷🇺 RU"), or returns code alone
-// when the flag is unknown.
 func withFlag(flag, code string) string {
 	if flag == "" {
 		return code
@@ -90,8 +76,6 @@ func withFlag(flag, code string) string {
 	return flag + " " + code
 }
 
-// exitRegion renders the exit region as external services see it ("🇷🇺 RU"), or
-// "?" when unknown.
 func exitRegion(t traceResult) string {
 	if t.loc == "" {
 		return "?"
@@ -99,8 +83,6 @@ func exitRegion(t traceResult) string {
 	return withFlag(flagEmoji(t.loc), t.loc)
 }
 
-// exitColo renders the WARP edge node the tunnel landed on ("🇷🇺 DME"), or "?"
-// when unknown.
 func exitColo(t traceResult) string {
 	if t.colo == "" {
 		return "?"
@@ -108,7 +90,6 @@ func exitColo(t traceResult) string {
 	return withFlag(coloFlag(t.colo), t.colo)
 }
 
-// exitColosOf returns the distinct non-empty exit colos across every phase.
 func exitColosOf(phases []phaseResult) []string {
 	seen := make(map[string]struct{})
 	var colos []string
@@ -128,12 +109,10 @@ func exitColosOf(phases []phaseResult) []string {
 	return colos
 }
 
-// workingSorted returns the durable endpoints sorted by exit colo then endpoint.
 func workingSorted(results []endpointResult) []endpointResult {
 	return filterSorted(results, endpointResult.working)
 }
 
-// flakySorted returns the endpoints that passed once but died on the re-probe.
 func flakySorted(results []endpointResult) []endpointResult {
 	return filterSorted(results, endpointResult.flaky)
 }
@@ -149,12 +128,10 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 	return out
 }
 
-// lessByPing orders by latency ascending with unknown (0) pings last, breaking
-// ties on the endpoint string for a stable order.
 func lessByPing(a, b endpointResult) bool {
 	ap, bp := a.latency, b.latency
 	if (ap <= 0) != (bp <= 0) {
-		return ap > 0 // known ping sorts before unknown
+		return ap > 0
 	}
 	if ap != bp {
 		return ap < bp
@@ -162,8 +139,6 @@ func lessByPing(a, b endpointResult) bool {
 	return a.endpoint < b.endpoint
 }
 
-// bestByPing returns the lowest-ping endpoint (unknown pings last). picks must
-// be non-empty.
 func bestByPing(picks []endpointResult) endpointResult {
 	best := picks[0]
 	for _, r := range picks[1:] {
@@ -182,9 +157,6 @@ func writeHeader(w io.Writer, working, probed int) {
 	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
 }
 
-// writeFullReport prints every working endpoint grouped by its exit region/colo,
-// the flaky ones, and one ready-to-use endpoint per subnet. Goes to the report
-// file.
 func writeFullReport(w io.Writer, results []endpointResult) {
 	working := workingSorted(results)
 	flaky := flakySorted(results)
@@ -217,7 +189,6 @@ func writeFullReport(w io.Writer, results []endpointResult) {
 	}
 }
 
-// subnetEndpoints returns the working endpoints whose IP falls in the base /24.
 func subnetEndpoints(working []endpointResult, base string) []endpointResult {
 	var picks []endpointResult
 	for _, r := range working {
@@ -228,16 +199,12 @@ func subnetEndpoints(working []endpointResult, base string) []endpointResult {
 	return picks
 }
 
-// writeConsole prints a colored, framed summary to the terminal: a banner with
-// the working/probed counts, the unique colos and regions found, and a boxed
-// table of one working endpoint per subnet. The full per-endpoint report goes
-// to the file (writeFullReport, plain text).
 func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer) {
 	st := newConStyles(r)
 	results := ph.results
 	working := workingSorted(results)
 	flaky := flakySorted(results)
-	fmt.Fprintln(w) // blank line between the phase-2 progress and the table
+	fmt.Fprintln(w)
 	if len(working) == 0 {
 		fmt.Fprintln(w, st.fail.Render("No working endpoints found."))
 		writeFlakyNote(w, st, len(flaky))
@@ -254,8 +221,6 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer) {
 	writePicksTable(w, st, working, flaky)
 }
 
-// writeFlakyNote prints the count of endpoints that handshook but were dropped
-// on the re-probe, if any.
 func writeFlakyNote(w io.Writer, st conStyles, n int) {
 	if n == 0 {
 		return
@@ -263,20 +228,15 @@ func writeFlakyNote(w io.Writer, st conStyles, n int) {
 	fmt.Fprintf(w, "Flaky:    %s\n", st.warn.Render(fmt.Sprintf("%d (handshake ok, dropped on re-probe)", n)))
 }
 
-// banner renders the WARPSCOUT headline in a rounded box; the counts go on the
-// lines below it.
 func banner(st conStyles) string {
 	return st.box.Render("WARPSCOUT")
 }
 
-// pickRow is one table row plus the status used to color it.
 type pickRow struct {
 	cells  []string
 	status int
 }
 
-// writePicksTable prints a boxed table of the lowest-ping endpoint per subnet: a
-// durable one when available, otherwise a flaky one flagged in yellow.
 func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult) {
 	var rows []pickRow
 	for _, base := range pools {
@@ -326,16 +286,11 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult)
 	fmt.Fprintln(w, t.Render())
 }
 
-// bothRow is one -proto both row: cells plus the per-cell statuses that color it.
 type bothRow struct {
 	cells                 []string
 	wgStat, awgStat, pick int
 }
 
-// writeConsoleBoth renders the -proto both comparison: per subnet, whether wg
-// and awg each yield a durable (OK), flaky, or no (-) endpoint, plus one
-// concrete endpoint to use (a durable wg one preferred). Directly answers which
-// subnets work on plain WireGuard and which need AmneziaWG obfuscation.
 func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
 	st := newConStyles(r)
 	var wg, awg []endpointResult
@@ -431,22 +386,16 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer) {
 	fmt.Fprintln(w, t.Render())
 }
 
-// bestPick returns one endpoint to use for a subnet, preferring a durable wg one,
-// then durable awg, then flaky wg, then flaky awg; within the chosen set it picks
-// the lowest ping, returning its exit region and colo separately. flaky reports
-// whether the chosen endpoint is only flaky. Empty endpoint means nothing worked.
 func bestPick(base string, sets ...[]endpointResult) (endpoint, ping, region, colo string, flaky bool) {
 	for i, set := range sets {
 		if picks := subnetEndpoints(set, base); len(picks) > 0 {
 			r := bestByPing(picks)
-			return r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit), i >= 2 // sets[2:] are the flaky lists
+			return r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit), i >= 2
 		}
 	}
 	return "", "", "", "", false
 }
 
-// uniqueSorted collects the non-empty key(r) values, sorted, each rendered with
-// its flag (flagFor(v) may return "" to omit it), and space-joined.
 func uniqueSorted(working []endpointResult, key func(endpointResult) string, flagFor func(string) string) string {
 	seen := make(map[string]struct{})
 	for _, r := range working {
@@ -465,8 +414,6 @@ func uniqueSorted(working []endpointResult, key func(endpointResult) string, fla
 	return strings.Join(vals, "  ")
 }
 
-// writeSubnetPicks prints the lowest-ping working endpoint per subnet, with its
-// ping and real (phase-2) region/colo, so the best one can be grabbed per pool.
 func writeSubnetPicks(w io.Writer, working []endpointResult) {
 	fmt.Fprintln(w, "\n  ── Best working endpoint per subnet (lowest ping) ──")
 	for _, base := range pools {
@@ -481,7 +428,6 @@ func writeSubnetPicks(w io.Writer, working []endpointResult) {
 	}
 }
 
-// phaseResult pairs a protocol run with its per-endpoint results.
 type phaseResult struct {
 	run     protoRun
 	results []endpointResult

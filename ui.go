@@ -2,7 +2,6 @@ package main
 
 import "os"
 
-// ANSI SGR codes for the palette.
 const (
 	ansiReset  = "\033[0m"
 	ansiBold   = "\033[1m"
@@ -13,10 +12,8 @@ const (
 	ansiYellow = "\033[33m"
 )
 
-// errPal colors status and error messages on stderr; set once in main.
 var errPal palette
 
-// isTerminal reports whether f is an interactive terminal (not a pipe/file).
 func isTerminal(f *os.File) bool {
 	fi, err := f.Stat()
 	if err != nil {
@@ -25,16 +22,10 @@ func isTerminal(f *os.File) bool {
 	return fi.Mode()&os.ModeCharDevice != 0
 }
 
-// colorEnabled reports whether ANSI color should be emitted to f: only when f
-// is a terminal and NO_COLOR is unset (https://no-color.org).
 func colorEnabled(f *os.File) bool {
 	return os.Getenv("NO_COLOR") == "" && isTerminal(f)
 }
 
-// palette wraps ANSI colors, becoming a no-op when disabled so the same writer
-// code serves both the colored console and the plain report file. It still backs
-// the stderr status lines (errPal) and the --help screen (usage); the scan
-// dashboard and report tables use lipgloss (tui.go, report.go).
 type palette struct {
 	enabled bool
 }

@@ -6,8 +6,6 @@ import (
 	"strconv"
 )
 
-// WARP endpoint pools (ported from warp_colo_check.sh POOLS). For each /24 base
-// every last octet 0..255 is probed.
 var pools = []string{
 	"8.47.69.",
 	"162.159.192.",
@@ -18,9 +16,6 @@ var pools = []string{
 	"188.114.99.",
 }
 
-// expandPools returns host addresses across all pools. With perSubnet <= 0 or
-// >= 256 it returns every /24 host (full scan); otherwise it returns perSubnet
-// random hosts from each /24.
 func expandPools(perSubnet int) []netip.Addr {
 	full := perSubnet <= 0 || perSubnet >= 256
 	perPool := 256

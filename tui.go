@@ -14,11 +14,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Scan progress events. These are plain tea.Msg values so the same emit seam
-// feeds either the live TUI (via program.Send) or plainEmit (line output).
 type (
-	// stepMsg drives a count-less phase (phase 1, colo resolution): start
-	// (done/fail false), success (done), or failure (fail).
 	stepMsg struct {
 		label, summary string
 		done, fail     bool
@@ -31,21 +27,16 @@ type (
 	foundMsg  struct {
 		endpoint string
 		latency  time.Duration
-		exit     string // exit region ("🇷🇺 RU")
-		colo     string // WARP edge node ("🇷🇺 DME")
+		exit     string
+		colo     string
 		flaky    bool
 	}
 	barEndMsg struct{ label, summary string }
 	doneMsg   struct{}
 )
 
-// emitter is the seam runScan writes progress to.
 type emitter func(tea.Msg)
 
-// plainEmit is the non-TTY emitter: one start line and one summary line per
-// phase, no animation, matching the pre-TUI plain output. probed/found events
-// are the per-endpoint firehose and stay silent here, so it is safe to call
-// from the phase-2 worker goroutines without locking.
 func plainEmit(msg tea.Msg) {
 	switch m := msg.(type) {
 	case stepMsg:
@@ -64,21 +55,20 @@ func plainEmit(msg tea.Msg) {
 	}
 }
 
-const feedMax = 12 // discovered endpoints shown in the live feed
+const feedMax = 12
 
-// scanModel is the bubbletea model for the live scan dashboard.
 type scanModel struct {
 	cancel context.CancelFunc
 	st     conStyles
 	spin   spinner.Model
 	bar    progress.Model
 
-	lines []string   // completed ✔ / ✗ phase lines
-	step  string     // active count-less step label ("" if none)
-	label string     // active bar label
-	total int        // active bar total (0 if no bar)
-	done  int        // active bar progress
-	feed  []foundMsg // discovered endpoints, kept sorted by ping
+	lines []string
+	step  string
+	label string
+	total int
+	done  int
+	feed  []foundMsg
 
 	finished bool
 }
@@ -161,8 +151,6 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// lessLatency orders feed rows like lessByPing: known ping first, ascending,
-// ties broken by endpoint.
 func lessLatency(a, b foundMsg) bool {
 	if (a.latency <= 0) != (b.latency <= 0) {
 		return a.latency > 0

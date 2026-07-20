@@ -6,7 +6,6 @@ import (
 	"sync"
 )
 
-// runPool runs fn(0..n-1) with at most workers running concurrently.
 func runPool(workers, n int, fn func(i int)) {
 	if workers < 1 {
 		workers = 1
@@ -25,8 +24,6 @@ func runPool(workers, n int, fn func(i int)) {
 	wg.Wait()
 }
 
-// runTunnelPool creates up to workers persistent tunnels and dispatches indices
-// 0..n-1 across them, each worker reusing its tunnel for every job it pulls.
 func runTunnelPool(workers int, awg bool, n int, fn func(tn *tunnel, i int)) error {
 	if workers < 1 {
 		workers = 1
