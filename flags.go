@@ -40,7 +40,7 @@ var flagGroups = []flagGroup{
 	{"Scan tuning", []flagSpec{
 		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
 		{"t", "timeout", "SEC", "per-request timeout"},
-		{"P", "ping", "", "ping wg tunnels through to catch flaky (TSPU-dropped) endpoints; off by default for speed"},
+		{"P", "ping", "", "measure in-tunnel RTT and packet loss and flag flaky (TSPU-torn-down) endpoints; off by default for speed"},
 		{"n", "sample", "N", "addresses to sample per /24 subnet"},
 		{"f", "full", "", "scan all 256 addresses per /24 (overrides -sample)"},
 	}},

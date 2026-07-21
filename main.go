@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
+	"runtime"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -124,8 +125,16 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 	for _, run := range runs {
 		results := make([]endpointResult, len(ips))
 		pings := 0
-		if opts.pingCheck && !run.awg {
+		parallel := opts.tunnelParallel
+		if opts.pingCheck {
 			pings = durabilityPings
+			// RTT/loss is timing-sensitive; running many userspace tunnels per core
+			// starves the netstack and fakes packet loss (false flaky). Narrow the
+			// pool to the core count so each ping burst gets a real timeslice.
+			if cores := runtime.GOMAXPROCS(0); cores < parallel {
+				parallel = cores
+				emit(stepMsg{done: true, label: "Ping mode", summary: fmt.Sprintf("tunnel jobs capped to %d (cores) for accurate RTT/loss", parallel)})
+			}
 		}
 		label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
 		emit(barBeginMsg{label: label, total: len(ips)})
@@ -133,16 +142,19 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 			defer emit(probedMsg{})
 			ip := ips[i]
 			r := endpointResult{ip: ip}
-			if t, endpoint, ok, durable := tn.trace(ctx, ip, timeout, pings); ok {
-				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, durable
-				if rtt, pok := pingHost(ip, timeout); pok {
-					r.latency = rtt
+			if t, endpoint, ok, rtt, loss, flaky := tn.trace(ctx, ip, timeout, pings); ok {
+				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
+				if pings > 0 {
+					r.rtt, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
 				}
-				emit(foundMsg{endpoint: endpoint, latency: r.latency, exit: exitRegion(t), colo: exitColo(t), flaky: !durable})
+				if hrtt, pok := pingHost(ip, timeout); pok {
+					r.latency = hrtt
+				}
+				emit(foundMsg{endpoint: endpoint, latency: r.ping(), loss: r.loss, measured: r.measured, exit: exitRegion(t), colo: exitColo(t), flaky: !r.durable})
 			}
 			results[i] = r
 		}
-		if err := runTunnelPool(opts.tunnelParallel, run.awg, len(ips), work); err != nil {
+		if err := runTunnelPool(parallel, run.awg, len(ips), work); err != nil {
 			emit(stepMsg{fail: true, summary: err.Error()})
 			return nil, err
 		}

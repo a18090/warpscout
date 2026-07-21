@@ -27,6 +27,8 @@ type (
 	foundMsg  struct {
 		endpoint string
 		latency  time.Duration
+		loss     float32
+		measured bool
 		exit     string
 		colo     string
 		flaky    bool
@@ -152,6 +154,9 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func lessLatency(a, b foundMsg) bool {
+	if a.loss != b.loss {
+		return a.loss < b.loss
+	}
 	if (a.latency <= 0) != (b.latency <= 0) {
 		return a.latency > 0
 	}
@@ -159,6 +164,13 @@ func lessLatency(a, b foundMsg) bool {
 		return a.latency < b.latency
 	}
 	return a.endpoint < b.endpoint
+}
+
+func (m foundMsg) lossStr() string {
+	if !m.measured {
+		return "-"
+	}
+	return fmt.Sprintf("%.0f%%", m.loss*100)
 }
 
 func (m scanModel) View() string {
@@ -196,16 +208,17 @@ func (m scanModel) renderFeed() string {
 		rows = rows[:feedMax]
 	}
 	var b strings.Builder
-	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" "+pad("EXIT", 10)+" COLO") + "\n")
+	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" "+pad("LOSS", 6)+" "+pad("EXIT", 10)+" COLO") + "\n")
 	for _, r := range rows {
 		ep := pad(r.endpoint, 22)
 		ping := pad(latencyStr(r.latency), 8)
+		loss := pad(r.lossStr(), 6)
 		if r.flaky {
-			b.WriteString(st.warn.Render(ep+" "+ping+" flaky") + "\n")
+			b.WriteString(st.warn.Render(ep+" "+ping+" "+loss+" flaky") + "\n")
 			continue
 		}
 		exit := r.exit + strings.Repeat(" ", max(0, 10-lipgloss.Width(r.exit)))
-		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + exit + " " + r.colo + "\n")
+		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + st.accent.Render(loss) + " " + exit + " " + r.colo + "\n")
 	}
 	if extra > 0 {
 		b.WriteString(st.dim.Render(fmt.Sprintf("… +%d more", extra)) + "\n")

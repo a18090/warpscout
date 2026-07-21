@@ -45,21 +45,66 @@ func TestWriteConsolePalette(t *testing.T) {
 	}
 }
 
-func TestDurableVerdict(t *testing.T) {
+func TestLessByLossRTT(t *testing.T) {
+	mk := func(ep string, ms int, loss float32, measured bool) endpointResult {
+		return endpointResult{endpoint: ep, rtt: time.Duration(ms) * time.Millisecond, loss: loss, measured: measured}
+	}
+	cases := []struct {
+		name string
+		a, b endpointResult
+		want bool // a ranks before b
+	}{
+		{"lower loss beats lower ping", mk("a", 200, 0, true), mk("b", 20, 0.2, true), true},
+		{"equal loss falls back to ping", mk("a", 20, 0.1, true), mk("b", 90, 0.1, true), true},
+		{"unmeasured ranks by host ping", endpointResult{endpoint: "a", latency: 20 * time.Millisecond}, endpointResult{endpoint: "b", latency: 90 * time.Millisecond}, true},
+		{"tie broken by endpoint", mk("a", 20, 0, true), mk("b", 20, 0, true), true},
+	}
+	for _, c := range cases {
+		if got := lessByLossRTT(c.a, c.b); got != c.want {
+			t.Errorf("%s: lessByLossRTT = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestPingDiagnostics(t *testing.T) {
+	cases := []struct {
+		name     string
+		total    time.Duration
+		got      int
+		count    int
+		wantRTT  time.Duration
+		wantLoss float32
+	}{
+		{"no loss", 400 * time.Millisecond, 4, 4, 100 * time.Millisecond, 0},
+		{"half loss", 100 * time.Millisecond, 2, 4, 50 * time.Millisecond, 0.5},
+		{"total loss", 0, 0, 4, 0, 1},
+	}
+	for _, c := range cases {
+		if rtt := pingSummary(c.total, c.got); rtt != c.wantRTT {
+			t.Errorf("%s: pingSummary = %v, want %v", c.name, rtt, c.wantRTT)
+		}
+		if loss := lossFraction(c.got, c.count); loss != c.wantLoss {
+			t.Errorf("%s: lossFraction = %v, want %v", c.name, loss, c.wantLoss)
+		}
+	}
+}
+
+func TestTeardown(t *testing.T) {
 	cases := []struct {
 		name    string
 		results []bool
 		want    bool
 	}{
-		{"all ok", []bool{true, true, true, true}, true},
-		{"any single loss is flaky", []bool{true, false, true, true}, false},
-		{"tail drop (TSPU)", []bool{true, true, true, false, false}, false},
-		{"first loss is flaky", []bool{false, true, true}, false},
-		{"empty is durable", nil, true},
+		{"all ok", []bool{true, true, true, true, true}, false},
+		{"sporadic single drop is loss, not flaky", []bool{true, false, true, true, true}, false},
+		{"two mid drops recover", []bool{true, false, false, true, true}, false},
+		{"tail teardown (TSPU)", []bool{true, true, true, false, false, false}, true},
+		{"trips early, never recovers", []bool{true, false, false, false, false}, true},
+		{"short trailing run below threshold", []bool{true, true, true, true, false, false}, false},
 	}
 	for _, c := range cases {
-		if got := durableVerdict(c.results); got != c.want {
-			t.Errorf("%s: durableVerdict(%v) = %v, want %v", c.name, c.results, got, c.want)
+		if got := teardown(c.results); got != c.want {
+			t.Errorf("%s: teardown(%v) = %v, want %v", c.name, c.results, got, c.want)
 		}
 	}
 }
@@ -210,9 +255,9 @@ func TestParseTrace(t *testing.T) {
 func TestHandshakeDone(t *testing.T) {
 	cases := map[string]bool{
 		"last_handshake_time_sec=1700000000\nlast_handshake_time_nsec=0\n": true,
-		"last_handshake_time_sec=0\n":                                     false,
-		"public_key=abc\n":                                               false,
-		"": false,
+		"last_handshake_time_sec=0\n":                                      false,
+		"public_key=abc\n":                                                 false,
+		"":                                                                 false,
 	}
 	for conf, want := range cases {
 		if got := handshakeDone(conf); got != want {

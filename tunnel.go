@@ -61,14 +61,14 @@ func newTunnel(awg bool) (*tunnel, error) {
 
 func (t *tunnel) Close() { t.dev.Close() }
 
-func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int) (tr traceResult, endpoint string, ok, durable bool) {
+func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int) (tr traceResult, endpoint string, ok bool, rtt time.Duration, loss float32, flaky bool) {
 	for _, port := range warpPorts {
 		endpoint = fmt.Sprintf("%s:%d", ip, port)
-		if tr, durable, ok = t.traceEndpoint(ctx, endpoint, timeout, pings); ok {
-			return tr, endpoint, true, durable
+		if tr, rtt, loss, flaky, ok = t.traceEndpoint(ctx, endpoint, timeout, pings); ok {
+			return tr, endpoint, true, rtt, loss, flaky
 		}
 	}
-	return traceResult{}, endpoint, false, false
+	return traceResult{}, endpoint, false, 0, 0, false
 }
 
 func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Duration) bool {
@@ -91,29 +91,47 @@ func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Du
 	return waitHandshake(ctx, t.dev, timeout)
 }
 
-func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int) (tr traceResult, durable, ok bool) {
+func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int) (tr traceResult, rtt time.Duration, loss float32, flaky, ok bool) {
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
-		return traceResult{}, false, false
+		return traceResult{}, 0, 0, false, false
 	}
 	if err := t.dev.IpcSet(peer); err != nil {
-		return traceResult{}, false, false
+		return traceResult{}, 0, 0, false, false
 	}
 
 	// Wait for the handshake before sending traffic, otherwise the first TCP SYN
 	// is dropped by the not-yet-established peer and netstack stalls past timeout.
 	if !waitHandshake(ctx, t.dev, timeout) {
-		return traceResult{}, false, false
+		return traceResult{}, 0, 0, false, false
 	}
 
 	body, ok := t.fetch(ctx, timeout)
 	if !ok {
-		return traceResult{}, false, false
+		return traceResult{}, 0, 0, false, false
 	}
 	if pings <= 0 {
-		return parseTrace(body), true, true
+		return parseTrace(body), 0, 0, false, true
 	}
-	return parseTrace(body), t.pingDurable(pings, timeout), true
+	rtt, loss, flaky = t.durability(pings, timeout)
+	return parseTrace(body), rtt, loss, flaky, true
+}
+
+// durability runs a ping burst and, only if it looks torn down, confirms with a
+// second burst. A real TSPU teardown stays dead across both; transient loss does
+// not. The trustworthy (second) burst's numbers are reported when the first was
+// just noise. Measurement runs right after the trace (fresh handshake) and, under
+// -ping, the worker pool is narrowed to the core count so bursts are not starved.
+func (t *tunnel) durability(count int, timeout time.Duration) (time.Duration, float32, bool) {
+	rtt, loss, torn := t.tunnelPing(count, timeout)
+	if !torn {
+		return rtt, loss, false
+	}
+	rtt2, loss2, torn2 := t.tunnelPing(count, timeout)
+	if !torn2 {
+		return rtt2, loss2, false
+	}
+	return rtt, loss, true
 }
 
 func (t *tunnel) fetch(ctx context.Context, timeout time.Duration) (string, bool) {
@@ -125,42 +143,64 @@ func (t *tunnel) fetch(ctx context.Context, timeout time.Duration) (string, bool
 
 const (
 	pingTarget      = "1.1.1.1"
-	pingInterval    = 500 * time.Millisecond
+	pingInterval    = 200 * time.Millisecond
 	durabilityPings = 10
+	// flaky = the tunnel is torn down mid-stream and never recovers, i.e. a trailing
+	// run of dropped pings. Sporadic single drops are packet loss, not flaky, so we
+	// key off a run of consecutive tail failures rather than a loss percentage.
+	flakyTailFails = 3
 )
 
-func (t *tunnel) pingDurable(count int, timeout time.Duration) bool {
+// tunnelPing pushes ICMP echoes to 1.1.1.1 through the live tunnel - the only way
+// to catch a peer that handshakes but gets its data flow dropped by TSPU. Echoes
+// are spread over time (to give TSPU traffic to react to) but replies are matched
+// by sequence and collected in a shared window, so a reply merely delayed by a
+// contended netstack (many userspace tunnels running at once) still counts rather
+// than being scored as a loss. Returns average RTT, loss fraction (diagnostic),
+// and whether the tunnel looks torn down (a trailing run of unanswered echoes).
+func (t *tunnel) tunnelPing(count int, timeout time.Duration) (time.Duration, float32, bool) {
 	dst := netip.MustParseAddr(pingTarget)
 	pc, err := t.tnet.DialPingAddr(netip.Addr{}, dst)
 	if err != nil {
-		return true
+		return 0, 0, false
 	}
 	defer pc.Close()
 
+	sent := make([]time.Time, count)
+	got := make([]bool, count)
 	buf := make([]byte, 1500)
-	var results []bool
+	n := 0
+	var total time.Duration
+
+	drain := func(deadline time.Time) {
+		for n < count {
+			pc.SetReadDeadline(deadline)
+			m, err := pc.Read(buf)
+			if err != nil {
+				return
+			}
+			seq, ok := parseEchoSeq(buf[:m])
+			if !ok || seq < 0 || seq >= count || got[seq] || sent[seq].IsZero() {
+				continue
+			}
+			got[seq] = true
+			total += time.Since(sent[seq])
+			n++
+		}
+	}
+
 	for seq := 0; seq < count; seq++ {
-		if seq > 0 {
-			time.Sleep(pingInterval)
+		if t.sendEcho(pc, seq) {
+			sent[seq] = time.Now()
 		}
-		results = append(results, t.pingOnce(pc, seq, buf, timeout))
-		if !durableVerdict(results) {
-			return false
-		}
+		drain(time.Now().Add(pingInterval))
 	}
-	return true
+	drain(time.Now().Add(timeout)) // final window for stragglers before scoring loss
+
+	return pingSummary(total, n), lossFraction(n, count), teardown(got)
 }
 
-func durableVerdict(results []bool) bool {
-	for _, ok := range results {
-		if !ok {
-			return false
-		}
-	}
-	return true
-}
-
-func (t *tunnel) pingOnce(pc *netstack.PingConn, seq int, buf []byte, timeout time.Duration) bool {
+func (t *tunnel) sendEcho(pc *netstack.PingConn, seq int) bool {
 	msg := icmp.Message{
 		Type: ipv4.ICMPTypeEcho,
 		Body: &icmp.Echo{ID: 0xbeef, Seq: seq, Data: []byte("warpscout")},
@@ -169,12 +209,48 @@ func (t *tunnel) pingOnce(pc *netstack.PingConn, seq int, buf []byte, timeout ti
 	if err != nil {
 		return false
 	}
-	if _, err := pc.Write(wire); err != nil {
+	_, err = pc.Write(wire)
+	return err == nil
+}
+
+func parseEchoSeq(b []byte) (int, bool) {
+	m, err := icmp.ParseMessage(ipv4.ICMPTypeEchoReply.Protocol(), b)
+	if err != nil {
+		return 0, false
+	}
+	echo, ok := m.Body.(*icmp.Echo)
+	if !ok || m.Type != ipv4.ICMPTypeEchoReply {
+		return 0, false
+	}
+	return echo.Seq, true
+}
+
+func pingSummary(total time.Duration, got int) time.Duration {
+	if got == 0 {
+		return 0
+	}
+	return total / time.Duration(got)
+}
+
+func lossFraction(got, count int) float32 {
+	if count == 0 {
+		return 0
+	}
+	return float32(count-got) / float32(count)
+}
+
+// teardown reports a trailing run of at least flakyTailFails unanswered echoes:
+// the tunnel stopped passing traffic and did not come back.
+func teardown(results []bool) bool {
+	if len(results) < flakyTailFails {
 		return false
 	}
-	pc.SetReadDeadline(time.Now().Add(timeout))
-	_, err = pc.Read(buf)
-	return err == nil
+	for _, ok := range results[len(results)-flakyTailFails:] {
+		if ok {
+			return false
+		}
+	}
+	return true
 }
 
 const handshakePollInterval = 50 * time.Millisecond
