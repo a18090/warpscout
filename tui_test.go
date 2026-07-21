@@ -8,7 +8,7 @@ import (
 )
 
 func TestScanModelFeed(t *testing.T) {
-	var m tea.Model = newScanModel(nil)
+	var m tea.Model = newScanModel(nil, false)
 
 	step := func(msg tea.Msg) { m, _ = m.Update(msg) }
 

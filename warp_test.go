@@ -28,7 +28,7 @@ func TestWriteConsolePalette(t *testing.T) {
 	var plain bytes.Buffer
 	rPlain := lipgloss.NewRenderer(&plain)
 	rPlain.SetColorProfile(termenv.Ascii)
-	writeConsole(&plain, ph, rPlain)
+	writeConsole(&plain, ph, rPlain, false)
 	if strings.Contains(plain.String(), "\033") {
 		t.Error("plain (non-TTY) console output must not contain ANSI escapes")
 	}
@@ -39,7 +39,7 @@ func TestWriteConsolePalette(t *testing.T) {
 	var colored bytes.Buffer
 	rColor := lipgloss.NewRenderer(&colored)
 	rColor.SetColorProfile(termenv.TrueColor)
-	writeConsole(&colored, ph, rColor)
+	writeConsole(&colored, ph, rColor, false)
 	if !strings.Contains(colored.String(), "\033") {
 		t.Error("colored console output should contain ANSI escapes")
 	}

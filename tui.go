@@ -61,6 +61,7 @@ const feedMax = 12
 
 type scanModel struct {
 	cancel context.CancelFunc
+	ping   bool
 	st     conStyles
 	spin   spinner.Model
 	bar    progress.Model
@@ -75,13 +76,14 @@ type scanModel struct {
 	finished bool
 }
 
-func newScanModel(cancel context.CancelFunc) scanModel {
+func newScanModel(cancel context.CancelFunc, ping bool) scanModel {
 	st := newConStyles(lipgloss.NewRenderer(os.Stderr))
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = st.accent
 	return scanModel{
 		cancel: cancel,
+		ping:   ping,
 		st:     st,
 		spin:   sp,
 		bar:    progress.New(progress.WithDefaultGradient(), progress.WithWidth(28)),
@@ -207,18 +209,29 @@ func (m scanModel) renderFeed() string {
 		extra = len(rows) - feedMax
 		rows = rows[:feedMax]
 	}
+	lossHead := ""
+	if m.ping {
+		lossHead = pad("LOSS", 6) + " "
+	}
 	var b strings.Builder
-	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" "+pad("LOSS", 6)+" "+pad("EXIT", 10)+" COLO") + "\n")
+	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" "+lossHead+pad("EXIT", 10)+" COLO") + "\n")
 	for _, r := range rows {
 		ep := pad(r.endpoint, 22)
 		ping := pad(latencyStr(r.latency), 8)
-		loss := pad(r.lossStr(), 6)
+		loss := ""
+		if m.ping {
+			loss = pad(r.lossStr(), 6) + " "
+		}
 		if r.flaky {
-			b.WriteString(st.warn.Render(ep+" "+ping+" "+loss+" flaky") + "\n")
+			b.WriteString(st.warn.Render(ep+" "+ping+" "+loss+"flaky") + "\n")
 			continue
 		}
 		exit := r.exit + strings.Repeat(" ", max(0, 10-lipgloss.Width(r.exit)))
-		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + st.accent.Render(loss) + " " + exit + " " + r.colo + "\n")
+		lossSeg := ""
+		if m.ping {
+			lossSeg = st.accent.Render(loss)
+		}
+		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + lossSeg + exit + " " + r.colo + "\n")
 	}
 	if extra > 0 {
 		b.WriteString(st.dim.Render(fmt.Sprintf("… +%d more", extra)) + "\n")

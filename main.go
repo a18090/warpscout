@@ -70,7 +70,7 @@ func main() {
 		phases, scanErr = runScan(ctx, opts, runs, ips, timeout, plainEmit)
 	} else {
 		scanDone := make(chan struct{})
-		p := tea.NewProgram(newScanModel(cancel), tea.WithOutput(os.Stderr))
+		p := tea.NewProgram(newScanModel(cancel, opts.pingCheck), tea.WithOutput(os.Stderr))
 		go func() {
 			phases, scanErr = runScan(ctx, opts, runs, ips, timeout, p.Send)
 			close(scanDone)
@@ -87,15 +87,15 @@ func main() {
 
 	out := lipgloss.NewRenderer(os.Stdout)
 	if len(phases) == 1 {
-		writeConsole(os.Stdout, phases[0], out)
+		writeConsole(os.Stdout, phases[0], out, opts.pingCheck)
 	} else {
-		writeConsoleBoth(os.Stdout, phases, out)
+		writeConsoleBoth(os.Stdout, phases, out, opts.pingCheck)
 	}
 	reportPath := opts.output
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
 	}
-	if err := writeToFile(reportPath, phases); err != nil {
+	if err := writeToFile(reportPath, phases, opts.pingCheck); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", reportPath, err)))
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
