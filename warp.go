@@ -27,7 +27,22 @@ var (
 	awgI1   = "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"
 )
 
-var warpPorts = []int{2408, 500, 1701, 4500}
+// Phase 1 probes primaryWarpPorts first; the extended set (alternate UDP ports
+// Cloudflare also serves, from CloudflareWarpSpeedTest) is only swept when no
+// primary port gets through, so a restrictive network still has a chance without
+// making every scan pay 50 extra per-port timeouts. warpPorts holds the ports
+// phase 1 found open and is what phase 2 iterates.
+var (
+	primaryWarpPorts  = []int{2408, 500, 1701, 4500}
+	extendedWarpPorts = []int{
+		854, 859, 864, 878, 880, 890, 891, 894, 903, 908,
+		928, 934, 939, 942, 943, 945, 946, 955, 968, 987,
+		988, 1002, 1010, 1014, 1018, 1070, 1074, 1180, 1387, 1843,
+		2371, 2506, 3138, 3476, 3581, 3854, 4177, 4198, 4233, 5279,
+		5956, 7103, 7152, 7156, 7281, 7559, 8319, 8742, 8854, 8886,
+	}
+	warpPorts = primaryWarpPorts
+)
 
 func base64ToHex(b64 string) (string, error) {
 	raw, err := base64.StdEncoding.DecodeString(b64)

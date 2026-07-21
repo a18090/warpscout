@@ -69,9 +69,18 @@ func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout tim
 	}
 	defer tn.Close()
 
+	sampled := sampleAddrs(ips, sample)
+	if ports := probePorts(ctx, tn, sampled, primaryWarpPorts, timeout); len(ports) > 0 {
+		return ports, nil
+	}
+	// No primary port got through: locked-down network, sweep the alternates.
+	return probePorts(ctx, tn, sampled, extendedWarpPorts, timeout), nil
+}
+
+func probePorts(ctx context.Context, tn *tunnel, ips []netip.Addr, ports []int, timeout time.Duration) []int {
 	open := make(map[int]bool)
-	for _, ip := range sampleAddrs(ips, sample) {
-		for _, port := range warpPorts {
+	for _, ip := range ips {
+		for _, port := range ports {
 			if tn.handshake(ctx, fmt.Sprintf("%s:%d", ip, port), timeout) {
 				open[port] = true
 			}
@@ -81,13 +90,13 @@ func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout tim
 		}
 	}
 
-	var ports []int
-	for _, port := range warpPorts {
+	var out []int
+	for _, port := range ports {
 		if open[port] {
-			ports = append(ports, port)
+			out = append(out, port)
 		}
 	}
-	return ports, nil
+	return out
 }
 
 const (
