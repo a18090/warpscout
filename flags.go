@@ -21,6 +21,7 @@ type options struct {
 	register       bool
 	full           bool
 	plain          bool
+	noEmoji        bool
 }
 
 type flagSpec struct {
@@ -58,6 +59,7 @@ var flagGroups = []flagGroup{
 	{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
+		{"", "no-emoji", "", "drop country flag emoji (for terminals that can't render them)"},
 	}},
 }
 
@@ -91,6 +93,7 @@ func parseFlags() options {
 	boolFlag(&o.register, "r", "register")
 	boolFlag(&o.full, "f", "full")
 	flag.BoolVar(&o.plain, "plain", false, "")
+	flag.BoolVar(&o.noEmoji, "no-emoji", false, "")
 	flag.IntVar(&awgJc, "jc", awgJc, "")
 	flag.IntVar(&awgJmin, "jmin", awgJmin, "")
 	flag.IntVar(&awgJmax, "jmax", awgJmax, "")
