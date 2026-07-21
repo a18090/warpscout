@@ -206,3 +206,17 @@ func TestParseTrace(t *testing.T) {
 		t.Errorf("parseTrace = %+v", got)
 	}
 }
+
+func TestHandshakeDone(t *testing.T) {
+	cases := map[string]bool{
+		"last_handshake_time_sec=1700000000\nlast_handshake_time_nsec=0\n": true,
+		"last_handshake_time_sec=0\n":                                     false,
+		"public_key=abc\n":                                               false,
+		"": false,
+	}
+	for conf, want := range cases {
+		if got := handshakeDone(conf); got != want {
+			t.Errorf("handshakeDone(%q) = %v, want %v", conf, got, want)
+		}
+	}
+}

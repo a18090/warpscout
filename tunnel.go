@@ -177,6 +177,8 @@ func (t *tunnel) pingOnce(pc *netstack.PingConn, seq int, buf []byte, timeout ti
 	return err == nil
 }
 
+const handshakePollInterval = 50 * time.Millisecond
+
 func waitHandshake(ctx context.Context, dev *device.Device, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -187,17 +189,18 @@ func waitHandshake(ctx context.Context, dev *device.Device, timeout time.Duratio
 		if err == nil && handshakeDone(conf) {
 			return true
 		}
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(handshakePollInterval)
 	}
 	return false
 }
 
+const handshakeKey = "last_handshake_time_sec="
+
 func handshakeDone(conf string) bool {
-	const key = "last_handshake_time_sec="
-	for _, line := range strings.Split(conf, "\n") {
-		if strings.HasPrefix(line, key) && strings.TrimPrefix(line, key) != "0" {
-			return true
-		}
+	i := strings.Index(conf, handshakeKey)
+	if i < 0 {
+		return false
 	}
-	return false
+	v := i + len(handshakeKey)
+	return v < len(conf) && conf[v] != '0'
 }
