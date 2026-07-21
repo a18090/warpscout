@@ -80,9 +80,7 @@ func boolFlag(p *bool, short, long string) {
 
 func parseFlags() options {
 	var o options
-	// One shared WARP key: WireGuard keeps one session per key, so parallel
-	// tunnels clobber each other server-side. Keep phase-2 concurrency low.
-	intFlag(&o.tunnelParallel, 4, "jt", "tunnel-jobs")
+	intFlag(&o.tunnelParallel, 10, "jt", "tunnel-jobs")
 	intFlag(&o.timeoutSec, 2, "t", "timeout")
 	intFlag(&o.perSubnet, 10, "n", "sample")
 	strFlag(&o.proto, "wg", "p", "proto")
