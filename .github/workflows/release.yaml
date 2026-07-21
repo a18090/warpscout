@@ -72,7 +72,9 @@ jobs:
           {
             echo "## Commits"
             echo
-            git -P log --no-merges --pretty='- %s (%h)' "$RANGE"
+            git -P log --no-merges \
+              --pretty="- %s ([\`%h\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/%H))" \
+              "$RANGE"
           } > body.md
 
       - uses: actions/download-artifact@v4
