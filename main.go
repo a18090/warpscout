@@ -15,6 +15,7 @@ func main() {
 	opts := parseFlags()
 
 	errPal = palette{enabled: colorEnabled(os.Stderr)}
+	noEmoji = usePlainOutput(opts)
 
 	runs, err := parseProto(opts.proto)
 	if err != nil {
