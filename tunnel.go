@@ -39,7 +39,11 @@ func newTunnel(awg bool) (*tunnel, error) {
 	if err != nil {
 		return nil, err
 	}
-	dev := device.NewDevice(tunDev, conn.NewDefaultBind(), device.NewLogger(device.LogLevelSilent, ""))
+	bind := conn.Bind(conn.NewDefaultBind())
+	if scanSourceIP.IsValid() {
+		bind = newSourceBind(scanSourceIP)
+	}
+	dev := device.NewDevice(tunDev, bind, device.NewLogger(device.LogLevelSilent, ""))
 
 	if err := dev.IpcSet(base); err != nil {
 		dev.Close()

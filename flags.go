@@ -16,6 +16,7 @@ type options struct {
 	proto          string
 	output         string
 	proxy          string
+	iface          string
 	accountPath    string
 	pingCheck      bool
 	ipv6           bool
@@ -45,6 +46,7 @@ var flagGroups = []flagGroup{
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 		{"6", "ipv6", "", "scan IPv6 endpoint pools instead of IPv4"},
+		{"I", "interface", "NAME", "scan through this interface (bind to its source IP)"},
 	}},
 	{"Protocol & registration", []flagSpec{
 		{"p", "proto", "wg|awg|both", "tunnel protocol: wg (WireGuard), awg (AmneziaWG), or both"},
@@ -88,6 +90,7 @@ func parseFlags() options {
 	strFlag(&o.proto, "wg", "p", "proto")
 	strFlag(&o.output, "", "o", "output")
 	strFlag(&o.proxy, "", "x", "proxy")
+	strFlag(&o.iface, "", "I", "interface")
 	strFlag(&o.accountPath, defaultAccount, "a", "account")
 	boolFlag(&o.pingCheck, "P", "ping")
 	boolFlag(&o.ipv6, "6", "ipv6")

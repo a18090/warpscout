@@ -4,8 +4,13 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"net/netip"
 	"strings"
 )
+
+// Set once from -interface (main.go) before any tunnel is built. Zero value means
+// the default wildcard bind. Global to avoid threading through newTunnel's callers.
+var scanSourceIP netip.Addr
 
 // Registration (register.go) overwrites these in place, so var not const.
 var (

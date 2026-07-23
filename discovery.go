@@ -72,6 +72,38 @@ func haveAddrFamily(v6 bool) bool {
 	return false
 }
 
+func famName(v6 bool) string {
+	if v6 {
+		return "IPv6"
+	}
+	return "IPv4"
+}
+
+func interfaceAddr(name string, v6 bool) (netip.Addr, error) {
+	ifi, err := net.InterfaceByName(name)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	addrs, err := ifi.Addrs()
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok || !ipn.IP.IsGlobalUnicast() {
+			continue
+		}
+		if v6 == (ipn.IP.To4() == nil) {
+			ip, ok := netip.AddrFromSlice(ipn.IP)
+			if !ok {
+				continue
+			}
+			return ip.Unmap(), nil
+		}
+	}
+	return netip.Addr{}, fmt.Errorf("interface %s has no %s address", name, famName(v6))
+}
+
 func anyAWG(runs []protoRun) bool {
 	for _, r := range runs {
 		if r.awg {
@@ -153,15 +185,23 @@ func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
 }
 
 func listenPing(addr netip.Addr) (*icmp.PacketConn, net.Addr) {
-	udpNet, rawNet, bind := "udp4", "ip4:icmp", "0.0.0.0"
+	udpNet, rawNet, wildcard := "udp4", "ip4:icmp", "0.0.0.0"
 	if addr.Is6() {
-		udpNet, rawNet, bind = "udp6", "ip6:ipv6-icmp", "::"
+		udpNet, rawNet, wildcard = "udp6", "ip6:ipv6-icmp", "::"
 	}
-	if conn, err := icmp.ListenPacket(udpNet, bind); err == nil {
-		return conn, &net.UDPAddr{IP: addr.AsSlice()}
+	// Bind the host ping to the scan interface's address so latency is measured from
+	// the same egress; fall back to the wildcard if that bind is unavailable.
+	binds := []string{wildcard}
+	if scanSourceIP.IsValid() && scanSourceIP.Is6() == addr.Is6() {
+		binds = []string{scanSourceIP.String(), wildcard}
 	}
-	if conn, err := icmp.ListenPacket(rawNet, bind); err == nil {
-		return conn, &net.IPAddr{IP: addr.AsSlice()}
+	for _, bind := range binds {
+		if conn, err := icmp.ListenPacket(udpNet, bind); err == nil {
+			return conn, &net.UDPAddr{IP: addr.AsSlice()}
+		}
+		if conn, err := icmp.ListenPacket(rawNet, bind); err == nil {
+			return conn, &net.IPAddr{IP: addr.AsSlice()}
+		}
 	}
 	return nil, nil
 }

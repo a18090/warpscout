@@ -40,12 +40,17 @@ func main() {
 	if opts.ipv6 {
 		pools = poolsV6
 	}
-	if !haveAddrFamily(opts.ipv6) {
-		fam := "IPv4"
-		if opts.ipv6 {
-			fam = "IPv6"
+	// With -interface, interfaceAddr is the authoritative family check (per-interface,
+	// precise error); the host-wide check only runs without it.
+	if opts.iface != "" {
+		ip, err := interfaceAddr(opts.iface, opts.ipv6)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
+			os.Exit(1)
 		}
-		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("no routable %s address on this host - nothing to scan", fam)))
+		scanSourceIP = ip
+	} else if !haveAddrFamily(opts.ipv6) {
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("no routable %s address on this host - nothing to scan", famName(opts.ipv6))))
 		os.Exit(1)
 	}
 	sample := opts.perSubnet
@@ -118,6 +123,9 @@ func usePlainOutput(opts options) bool {
 }
 
 func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, emit emitter) ([]phaseResult, error) {
+	if scanSourceIP.IsValid() {
+		emit(stepMsg{done: true, label: "Interface", summary: fmt.Sprintf("%s (%s)", opts.iface, scanSourceIP)})
+	}
 	open, err := reachablePorts(ctx, anyAWG(runs), ips, timeout, portProbeSample, emit)
 	if err != nil {
 		emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
