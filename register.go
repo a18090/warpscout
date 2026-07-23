@@ -31,6 +31,7 @@ const (
 	defaultAccount  = "warpscout-account.json"
 	apiReachTimeout = 3 * time.Second
 	registerTimeout = 15 * time.Second
+	regTunnelMSS    = 1200
 )
 
 type account struct {
@@ -182,6 +183,27 @@ func apiReachable(client *http.Client) bool {
 	return true
 }
 
+func regTransport(proxy *url.URL) *http.Transport {
+	d := &net.Dialer{}
+	t := &http.Transport{DialContext: d.DialContext}
+	if scanInterface != "" {
+		d.Control = deviceControl(scanInterface, regTunnelMSS)
+		// Force the interface's address family: a v6 dial through a v4-only tun
+		// (or vice versa) blackholes, so pin the network to what the interface carries.
+		network := "tcp4"
+		if scanSourceIP.Is6() {
+			network = "tcp6"
+		}
+		t.DialContext = func(ctx context.Context, _, addr string) (net.Conn, error) {
+			return d.DialContext(ctx, network, addr)
+		}
+	}
+	if proxy != nil {
+		t.Proxy = http.ProxyURL(proxy)
+	}
+	return t
+}
+
 func proxyClient(proxyURL string) (*http.Client, error) {
 	u, err := url.Parse(proxyURL)
 	if err != nil {
@@ -189,16 +211,31 @@ func proxyClient(proxyURL string) (*http.Client, error) {
 	}
 	return &http.Client{
 		Timeout:   registerTimeout,
-		Transport: &http.Transport{Proxy: http.ProxyURL(u)},
+		Transport: regTransport(u),
 	}, nil
 }
 
+func resolveIPv4(host string) (string, error) {
+	ips, err := net.LookupHost(host)
+	if err != nil {
+		return "", err
+	}
+	for _, ip := range ips {
+		if a, err := netip.ParseAddr(ip); err == nil && a.Is4() {
+			return ip, nil
+		}
+	}
+	return "", fmt.Errorf("no IPv4 address for %s", host)
+}
+
 func tunnelClient(tnet *netstack.Net) (*http.Client, error) {
-	ips, err := net.LookupHost(apiHost)
-	if err != nil || len(ips) == 0 {
+	// The netstack tunnel only has a v4 address (warpAddress), so the API must be
+	// dialed over IPv4 - a v6 target picked from LookupHost would blackhole.
+	ip, err := resolveIPv4(apiHost)
+	if err != nil {
 		return nil, fmt.Errorf("resolve %s: %w", apiHost, err)
 	}
-	target := net.JoinHostPort(ips[0], "443")
+	target := net.JoinHostPort(ip, "443")
 	return &http.Client{
 		Timeout: registerTimeout,
 		Transport: &http.Transport{
@@ -224,7 +261,7 @@ func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr
 	}
 
 	fmt.Fprintln(os.Stderr, errPal.dim("Checking Cloudflare API availability..."))
-	direct := &http.Client{Timeout: registerTimeout}
+	direct := &http.Client{Timeout: registerTimeout, Transport: regTransport(nil)}
 	if apiReachable(direct) {
 		return registerWARP(ctx, direct)
 	}
