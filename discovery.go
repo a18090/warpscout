@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
-	"sync"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -18,23 +17,6 @@ import (
 )
 
 const traceURL = "https://cloudflare.com/cdn-cgi/trace"
-
-func discoverColo(ctx context.Context, ip netip.Addr, timeout time.Duration) (traceResult, bool) {
-	dialer := &net.Dialer{Timeout: timeout}
-	transport := &http.Transport{
-		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), "443"))
-		},
-	}
-	client := &http.Client{Transport: transport, Timeout: timeout}
-
-	body, ok := fetchTrace(ctx, client, traceURL)
-	if !ok {
-		return traceResult{}, false
-	}
-	t := parseTrace(body)
-	return t, t.colo != ""
-}
 
 func fetchTrace(ctx context.Context, client *http.Client, url string) (string, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -265,29 +247,4 @@ func sampleAddrs(ips []netip.Addr, n int) []netip.Addr {
 		out[i] = ips[j]
 	}
 	return out
-}
-
-func discoverAlive(ctx context.Context, ips []netip.Addr, workers int, timeout time.Duration, want int) []netip.Addr {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	var mu sync.Mutex
-	var found []netip.Addr
-	runPool(workers, len(ips), func(i int) {
-		if ctx.Err() != nil {
-			return
-		}
-		if _, ok := discoverColo(ctx, ips[i], timeout); !ok {
-			return
-		}
-		mu.Lock()
-		if len(found) < want {
-			found = append(found, ips[i])
-			if len(found) >= want {
-				cancel()
-			}
-		}
-		mu.Unlock()
-	})
-	return found
 }
