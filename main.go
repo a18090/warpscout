@@ -60,7 +60,7 @@ func main() {
 	ips := expandPools(sample)
 
 	if !haveConfig {
-		a, err := obtainAccount(ctx, runs[0].awg, opts.proxy, ips, timeout)
+		a, err := obtainAccount(ctx, runs[0].awg, opts.proxy, ips, timeout, usePlainOutput(opts))
 		if err != nil {
 			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("registration failed: %v", err)))
 			if opts.proxy == "" {

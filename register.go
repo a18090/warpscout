@@ -19,6 +19,7 @@ import (
 	"golang.org/x/crypto/curve25519"
 
 	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
+	"github.com/charmbracelet/bubbles/progress"
 )
 
 const (
@@ -213,7 +214,7 @@ const tunnelDiscoverySample = 64
 
 const tunnelDiscoveryBudget = 40 * time.Second
 
-func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr, timeout time.Duration) (account, error) {
+func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr, timeout time.Duration, plain bool) (account, error) {
 	if proxy != "" {
 		c, err := proxyClient(proxy)
 		if err != nil {
@@ -234,8 +235,11 @@ func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr
 	sampled := sampleAddrs(ips, tunnelDiscoverySample)
 	var lastErr error
 	for _, p := range []bool{awg, !awg} {
-		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("  probing %s endpoints...", protoName(p))))
-		a, err := registerViaTunnel(ctx, p, sampled, timeout)
+		onProbe := discoveryProgress(protoName(p), len(sampled), plain)
+		a, err := registerViaTunnel(ctx, p, sampled, timeout, onProbe)
+		if onProbe != nil {
+			fmt.Fprintln(os.Stderr)
+		}
 		if err == nil {
 			return a, nil
 		}
@@ -245,11 +249,28 @@ func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr
 	return account{}, lastErr
 }
 
-// registerViaTunnel sweeps candidate endpoints and registers through the first
-// that completes a handshake, reusing that live tunnel. The handshake is the only
-// reachability test that survives the DPI which forced the tunnel fallback in the
-// first place.
-func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration) (account, error) {
+const discoveryBarWidth = 28
+
+// discoveryProgress returns an onProbe callback that renders an inline bar to
+// stderr as endpoints are probed. In plain (non-TTY) mode it prints a single
+// static line and returns nil, since a redrawing bar needs a terminal.
+func discoveryProgress(proto string, total int, plain bool) func(probed int) {
+	label := fmt.Sprintf("probing %s endpoints", proto)
+	if plain {
+		fmt.Fprintf(os.Stderr, "  %s...\n", label)
+		return nil
+	}
+	bar := progress.New(progress.WithDefaultGradient(), progress.WithWidth(discoveryBarWidth))
+	return func(probed int) {
+		fmt.Fprintf(os.Stderr, "\r\033[K  %s %s", label, bar.ViewAs(float64(probed)/float64(total)))
+	}
+}
+
+// registerViaTunnel sweeps candidate endpoints (reporting progress) and registers
+// through the first that completes a handshake, reusing that live tunnel. The
+// handshake is the only reachability test that survives the DPI which forced the
+// tunnel fallback in the first place.
+func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, onProbe func(probed int)) (account, error) {
 	tn, err := newTunnel(awg)
 	if err != nil {
 		return account{}, err
@@ -258,9 +279,12 @@ func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout 
 
 	ctx, cancel := context.WithTimeout(ctx, tunnelDiscoveryBudget)
 	defer cancel()
-	for _, ip := range ips {
+	for i, ip := range ips {
 		if ctx.Err() != nil {
 			break
+		}
+		if onProbe != nil {
+			onProbe(i + 1)
 		}
 		if !tn.connect(ctx, ip, timeout) {
 			continue
