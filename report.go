@@ -223,13 +223,13 @@ func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 		return
 	}
 
-	for _, base := range pools {
-		subnet := subnetEndpoints(working, base)
-		subnetFlaky := subnetEndpoints(flaky, base)
+	for _, p := range pools {
+		subnet := subnetEndpoints(working, p)
+		subnetFlaky := subnetEndpoints(flaky, p)
 		if len(subnet) == 0 && len(subnetFlaky) == 0 {
 			continue
 		}
-		fmt.Fprintf(w, "\n  ── %s0/24 ──  (%s)\n", base, sortNote(ping))
+		fmt.Fprintf(w, "\n  ── %s ──  (%s)\n", p, sortNote(ping))
 		for _, r := range subnet {
 			fmt.Fprintf(w, "    %-22s %-8s %s%-10s %s\n", r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit))
 		}
@@ -243,10 +243,10 @@ func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 	}
 }
 
-func subnetEndpoints(working []endpointResult, base string) []endpointResult {
+func subnetEndpoints(working []endpointResult, p netip.Prefix) []endpointResult {
 	var picks []endpointResult
 	for _, r := range working {
-		if strings.HasPrefix(r.ip.String(), base) {
+		if p.Contains(r.ip) {
 			picks = append(picks, r)
 		}
 	}
@@ -319,16 +319,16 @@ func metricCols(ping bool, pingCol int) map[int]bool {
 
 func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult, ping bool) {
 	var rows []pickRow
-	for _, base := range pools {
-		subnet := base + "0/24"
-		if picks := subnetEndpoints(working, base); len(picks) > 0 {
+	for _, p := range pools {
+		subnet := p.String()
+		if picks := subnetEndpoints(working, p); len(picks) > 0 {
 			r := bestByPing(picks)
 			cells := append([]string{subnet, r.endpoint, r.pingStr()}, lossCell(r, ping)...)
 			cells = append(cells, exitRegion(r.exit), exitColo(r.exit))
 			rows = append(rows, pickRow{cells, statusOK, r.loss, r.ping()})
 			continue
 		}
-		if picks := subnetEndpoints(flaky, base); len(picks) > 0 {
+		if picks := subnetEndpoints(flaky, p); len(picks) > 0 {
 			r := bestByPing(picks)
 			cells := append([]string{subnet, r.endpoint, r.pingStr()}, lossCell(r, ping)...)
 			cells = append(cells, "flaky", "")
@@ -413,21 +413,21 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer, p
 		st.ok.Render(strconv.Itoa(len(wgWork))), st.dim.Render(" / "), st.ok.Render(strconv.Itoa(len(awgWork))), probed)
 	fmt.Fprintln(w)
 
-	protoStatus := func(work, flaky []endpointResult, base string) (string, int) {
-		if len(subnetEndpoints(work, base)) > 0 {
+	protoStatus := func(work, flaky []endpointResult, p netip.Prefix) (string, int) {
+		if len(subnetEndpoints(work, p)) > 0 {
 			return "OK", statusOK
 		}
-		if len(subnetEndpoints(flaky, base)) > 0 {
+		if len(subnetEndpoints(flaky, p)) > 0 {
 			return "flaky", statusFlaky
 		}
 		return "-", statusNone
 	}
 
 	var rows []bothRow
-	for _, base := range pools {
-		wgTxt, wgStat := protoStatus(wgWork, wgFlaky, base)
-		awgTxt, awgStat := protoStatus(awgWork, awgFlaky, base)
-		r, found, isFlaky := bestPick(base, wgWork, awgWork, wgFlaky, awgFlaky)
+	for _, p := range pools {
+		wgTxt, wgStat := protoStatus(wgWork, wgFlaky, p)
+		awgTxt, awgStat := protoStatus(awgWork, awgFlaky, p)
+		r, found, isFlaky := bestPick(p, wgWork, awgWork, wgFlaky, awgFlaky)
 		endpoint, pingStr, region, colo := r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit)
 		loss := lossCell(r, ping)
 		pick := statusOK
@@ -440,7 +440,7 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer, p
 				loss = []string{""}
 			}
 		}
-		cells := append([]string{base + "0/24", wgTxt, awgTxt, endpoint, pingStr}, loss...)
+		cells := append([]string{p.String(), wgTxt, awgTxt, endpoint, pingStr}, loss...)
 		cells = append(cells, region, colo)
 		rows = append(rows, bothRow{cells, wgStat, awgStat, pick, r.loss, r.ping()})
 	}
@@ -498,9 +498,9 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer, p
 	fmt.Fprintln(w, t.Render())
 }
 
-func bestPick(base string, sets ...[]endpointResult) (best endpointResult, found, flaky bool) {
+func bestPick(p netip.Prefix, sets ...[]endpointResult) (best endpointResult, found, flaky bool) {
 	for i, set := range sets {
-		if picks := subnetEndpoints(set, base); len(picks) > 0 {
+		if picks := subnetEndpoints(set, p); len(picks) > 0 {
 			return bestByPing(picks), true, i >= 2
 		}
 	}
@@ -532,9 +532,9 @@ func writeSubnetPicks(w io.Writer, working []endpointResult, ping bool) {
 		latency time.Duration
 	}
 	var lines []line
-	for _, base := range pools {
-		picks := subnetEndpoints(working, base)
-		subnet := base + "0/24"
+	for _, p := range pools {
+		picks := subnetEndpoints(working, p)
+		subnet := p.String()
 		if len(picks) == 0 {
 			lines = append(lines, line{fmt.Sprintf("  %-18s %s", subnet, "no working endpoints"), 0, 0})
 			continue

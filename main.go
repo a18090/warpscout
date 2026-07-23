@@ -37,6 +37,17 @@ func main() {
 		}
 	}
 
+	if opts.ipv6 {
+		pools = poolsV6
+	}
+	if !haveAddrFamily(opts.ipv6) {
+		fam := "IPv4"
+		if opts.ipv6 {
+			fam = "IPv6"
+		}
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("no routable %s address on this host - nothing to scan", fam)))
+		os.Exit(1)
+	}
 	sample := opts.perSubnet
 	if opts.full {
 		sample = 0

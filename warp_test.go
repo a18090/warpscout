@@ -265,3 +265,20 @@ func TestHandshakeDone(t *testing.T) {
 		}
 	}
 }
+
+func TestExpandV6(t *testing.T) {
+	p := netip.MustParsePrefix("2606:4700:d0::/48")
+	const want = 10
+	ips := expandV6(p, want)
+	if len(ips) != want {
+		t.Fatalf("expandV6 count = %d, want %d", len(ips), want)
+	}
+	for _, ip := range ips {
+		if !ip.Is6() {
+			t.Errorf("%s is not IPv6", ip)
+		}
+		if !p.Contains(ip) {
+			t.Errorf("%s not in %s", ip, p)
+		}
+	}
+}

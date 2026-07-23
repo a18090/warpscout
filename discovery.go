@@ -8,11 +8,13 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"sync"
 	"time"
 
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
+	"golang.org/x/net/ipv6"
 )
 
 const traceURL = "https://cloudflare.com/cdn-cgi/trace"
@@ -53,6 +55,23 @@ func fetchTrace(ctx context.Context, client *http.Client, url string) (string, b
 
 const portProbeSample = 12
 
+func haveAddrFamily(v6 bool) bool {
+	addrs, err := net.InterfaceAddrs()
+	if err != nil {
+		return true
+	}
+	for _, a := range addrs {
+		ipn, ok := a.(*net.IPNet)
+		if !ok || !ipn.IP.IsGlobalUnicast() || ipn.IP.IsLinkLocalUnicast() {
+			continue
+		}
+		if v6 == (ipn.IP.To4() == nil) {
+			return true
+		}
+	}
+	return false
+}
+
 func anyAWG(runs []protoRun) bool {
 	for _, r := range runs {
 		if r.awg {
@@ -82,7 +101,7 @@ func probePorts(ctx context.Context, tn *tunnel, ips []netip.Addr, ports []int, 
 	open := make(map[int]bool)
 	for _, ip := range ips {
 		for _, port := range ports {
-			if tn.handshake(ctx, fmt.Sprintf("%s:%d", ip, port), timeout) {
+			if tn.handshake(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(port)), timeout) {
 				open[port] = true
 			}
 		}
@@ -134,18 +153,23 @@ func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
 }
 
 func listenPing(addr netip.Addr) (*icmp.PacketConn, net.Addr) {
-	if conn, err := icmp.ListenPacket("udp4", "0.0.0.0"); err == nil {
+	udpNet, rawNet, bind := "udp4", "ip4:icmp", "0.0.0.0"
+	if addr.Is6() {
+		udpNet, rawNet, bind = "udp6", "ip6:ipv6-icmp", "::"
+	}
+	if conn, err := icmp.ListenPacket(udpNet, bind); err == nil {
 		return conn, &net.UDPAddr{IP: addr.AsSlice()}
 	}
-	if conn, err := icmp.ListenPacket("ip4:icmp", "0.0.0.0"); err == nil {
+	if conn, err := icmp.ListenPacket(rawNet, bind); err == nil {
 		return conn, &net.IPAddr{IP: addr.AsSlice()}
 	}
 	return nil, nil
 }
 
 func pingHostOnce(conn *icmp.PacketConn, dst net.Addr, seq int, buf []byte, timeout time.Duration) (time.Duration, bool) {
+	echoType, replyType := icmpEchoTypes(dst)
 	msg := icmp.Message{
-		Type: ipv4.ICMPTypeEcho,
+		Type: echoType,
 		Body: &icmp.Echo{ID: pingID, Seq: seq, Data: []byte("warpscout")},
 	}
 	wire, err := msg.Marshal(nil)
@@ -164,15 +188,32 @@ func pingHostOnce(conn *icmp.PacketConn, dst net.Addr, seq int, buf []byte, time
 		if err != nil {
 			return 0, false
 		}
-		reply, err := icmp.ParseMessage(ipv4.ICMPTypeEchoReply.Protocol(), buf[:n])
+		reply, err := icmp.ParseMessage(replyType.Protocol(), buf[:n])
 		if err != nil {
 			continue
 		}
-		// "udp4" ICMP rewrites the ID, so match on the echoed sequence only.
-		if echo, ok := reply.Body.(*icmp.Echo); ok && reply.Type == ipv4.ICMPTypeEchoReply && echo.Seq == seq {
+		// The udp ICMP socket rewrites the ID, so match on the echoed sequence only.
+		if echo, ok := reply.Body.(*icmp.Echo); ok && reply.Type == replyType && echo.Seq == seq {
 			return time.Since(start), true
 		}
 	}
+}
+
+func icmpEchoTypes(dst net.Addr) (echo, reply icmp.Type) {
+	if isV6Addr(dst) {
+		return ipv6.ICMPTypeEchoRequest, ipv6.ICMPTypeEchoReply
+	}
+	return ipv4.ICMPTypeEcho, ipv4.ICMPTypeEchoReply
+}
+
+func isV6Addr(dst net.Addr) bool {
+	switch a := dst.(type) {
+	case *net.UDPAddr:
+		return a.IP.To4() == nil
+	case *net.IPAddr:
+		return a.IP.To4() == nil
+	}
+	return false
 }
 
 func sampleAddrs(ips []netip.Addr, n int) []netip.Addr {

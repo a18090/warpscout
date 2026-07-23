@@ -2,10 +2,10 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,7 +63,7 @@ func (t *tunnel) Close() { t.dev.Close() }
 
 func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int) (tr traceResult, endpoint string, ok bool, rtt time.Duration, loss float32, flaky bool) {
 	for _, port := range warpPorts {
-		endpoint = fmt.Sprintf("%s:%d", ip, port)
+		endpoint = net.JoinHostPort(ip.String(), strconv.Itoa(port))
 		if tr, rtt, loss, flaky, ok = t.traceEndpoint(ctx, endpoint, timeout, pings); ok {
 			return tr, endpoint, true, rtt, loss, flaky
 		}
@@ -73,7 +73,7 @@ func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration
 
 func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Duration) bool {
 	for _, port := range warpPorts {
-		if t.handshake(ctx, fmt.Sprintf("%s:%d", ip, port), timeout) {
+		if t.handshake(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(port)), timeout) {
 			return true
 		}
 	}

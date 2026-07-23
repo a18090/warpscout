@@ -18,6 +18,7 @@ type options struct {
 	proxy          string
 	accountPath    string
 	pingCheck      bool
+	ipv6           bool
 	register       bool
 	full           bool
 	plain          bool
@@ -41,8 +42,9 @@ var flagGroups = []flagGroup{
 		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
 		{"t", "timeout", "SEC", "per-request timeout"},
 		{"P", "ping", "", "measure in-tunnel RTT and packet loss and flag flaky (TSPU-torn-down) endpoints; off by default for speed"},
-		{"n", "sample", "N", "addresses to sample per /24 subnet"},
-		{"f", "full", "", "scan all 256 addresses per /24 (overrides -sample)"},
+		{"n", "sample", "N", "addresses to sample per subnet"},
+		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
+		{"6", "ipv6", "", "scan IPv6 endpoint pools instead of IPv4"},
 	}},
 	{"Protocol & registration", []flagSpec{
 		{"p", "proto", "wg|awg|both", "tunnel protocol: wg (WireGuard), awg (AmneziaWG), or both"},
@@ -88,6 +90,7 @@ func parseFlags() options {
 	strFlag(&o.proxy, "", "x", "proxy")
 	strFlag(&o.accountPath, defaultAccount, "a", "account")
 	boolFlag(&o.pingCheck, "P", "ping")
+	boolFlag(&o.ipv6, "6", "ipv6")
 	boolFlag(&o.register, "r", "register")
 	boolFlag(&o.full, "f", "full")
 	flag.BoolVar(&o.plain, "plain", false, "")
@@ -117,7 +120,7 @@ func usage() {
 	fmt.Fprintln(w, "  - Phase 1 finds which WARP ports get through this network")
 	fmt.Fprintln(w, "  - Phase 2 verifies each endpoint's real exit colo through a WARP tunnel")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Working endpoints are reported grouped per /24 subnet")
+	fmt.Fprintln(w, "Working endpoints are reported grouped per subnet")
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, st.title.Render("Usage:"))
 	fmt.Fprintf(w, "  %s [options]\n", st.accent.Render("warpscout"))
