@@ -1,43 +1,40 @@
 package main
 
 import (
+	"context"
 	"net"
 	"net/netip"
+	"strconv"
 
 	"github.com/amnezia-vpn/amneziawg-go/conn"
 )
 
-// sourceBind is a minimal conn.Bind that ties the tunnel's outer UDP socket to a
-// chosen source IP, so scan traffic egresses from a specific interface. amneziawg-go
-// exposes no hook for this on its StdNetBind, so we replace the Bind entirely. A
-// scanner talks to one peer at a time and needs no batching/GSO/sticky-socket
-// machinery, so this is a single unconnected socket with BatchSize 1 rather than a
-// copy of the 500-line StdNetBind.
-//
-// ponytail: source-IP bind, not SO_BINDTODEVICE. Forces the WARP source address to
-// the interface's IP (correct when that interface is the real egress); does not pin
-// the egress interface under policy routing. Upgrade path: a Control fn setting
-// SO_BINDTODEVICE (needs CAP_NET_RAW).
-type sourceBind struct {
-	src  netip.Addr
-	conn *net.UDPConn
+// deviceBind is a minimal conn.Bind that pins the tunnel's outer UDP socket to a
+// chosen interface via SO_BINDTODEVICE (deviceControl), so scan traffic egresses
+// through that interface - including a tun, which source-IP binding cannot route
+// into.
+type deviceBind struct {
+	iface string
+	conn  *net.UDPConn
 }
 
 type sourceEndpoint struct{ dst netip.AddrPort }
 
-func newSourceBind(src netip.Addr) *sourceBind { return &sourceBind{src: src} }
+func newDeviceBind(iface string) *deviceBind { return &deviceBind{iface: iface} }
 
-func (b *sourceBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
-	c, err := net.ListenUDP("udp", &net.UDPAddr{IP: b.src.AsSlice(), Port: int(port)})
+func (b *deviceBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
+	lc := net.ListenConfig{Control: deviceControl(b.iface, 0)}
+	pc, err := lc.ListenPacket(context.Background(), "udp", net.JoinHostPort("", strconv.Itoa(int(port))))
 	if err != nil {
 		return nil, 0, err
 	}
+	c := pc.(*net.UDPConn)
 	b.conn = c
 	actual := uint16(c.LocalAddr().(*net.UDPAddr).Port)
 	return []conn.ReceiveFunc{b.receive}, actual, nil
 }
 
-func (b *sourceBind) receive(bufs [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
+func (b *deviceBind) receive(bufs [][]byte, sizes []int, eps []conn.Endpoint) (int, error) {
 	n, addr, err := b.conn.ReadFromUDPAddrPort(bufs[0])
 	if err != nil {
 		// The only expected read error is the socket being closed; treat any as terminal
@@ -49,7 +46,7 @@ func (b *sourceBind) receive(bufs [][]byte, sizes []int, eps []conn.Endpoint) (i
 	return 1, nil
 }
 
-func (b *sourceBind) Send(bufs [][]byte, ep conn.Endpoint) error {
+func (b *deviceBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 	dst := ep.(*sourceEndpoint).dst
 	for _, buf := range bufs {
 		if _, err := b.conn.WriteToUDPAddrPort(buf, dst); err != nil {
@@ -59,7 +56,7 @@ func (b *sourceBind) Send(bufs [][]byte, ep conn.Endpoint) error {
 	return nil
 }
 
-func (b *sourceBind) ParseEndpoint(s string) (conn.Endpoint, error) {
+func (b *deviceBind) ParseEndpoint(s string) (conn.Endpoint, error) {
 	addr, err := netip.ParseAddrPort(s)
 	if err != nil {
 		return nil, err
@@ -67,16 +64,16 @@ func (b *sourceBind) ParseEndpoint(s string) (conn.Endpoint, error) {
 	return &sourceEndpoint{dst: addr}, nil
 }
 
-func (b *sourceBind) Close() error {
+func (b *deviceBind) Close() error {
 	if b.conn == nil {
 		return nil
 	}
 	return b.conn.Close()
 }
 
-func (b *sourceBind) SetMark(uint32) error { return nil }
+func (b *deviceBind) SetMark(uint32) error { return nil }
 
-func (b *sourceBind) BatchSize() int { return 1 }
+func (b *deviceBind) BatchSize() int { return 1 }
 
 func (e *sourceEndpoint) ClearSrc()           {}
 func (e *sourceEndpoint) SrcToString() string { return "" }

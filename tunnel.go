@@ -40,8 +40,8 @@ func newTunnel(awg bool) (*tunnel, error) {
 		return nil, err
 	}
 	bind := conn.Bind(conn.NewDefaultBind())
-	if scanSourceIP.IsValid() {
-		bind = newSourceBind(scanSourceIP)
+	if scanInterface != "" {
+		bind = newDeviceBind(scanInterface)
 	}
 	dev := device.NewDevice(tunDev, bind, device.NewLogger(device.LogLevelSilent, ""))
 

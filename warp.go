@@ -8,9 +8,13 @@ import (
 	"strings"
 )
 
-// Set once from -interface (main.go) before any tunnel is built. Zero value means
-// the default wildcard bind. Global to avoid threading through newTunnel's callers.
-var scanSourceIP netip.Addr
+// Set once from -interface (main.go) before any tunnel is built. Empty scanInterface
+// means the default bind; scanSourceIP is the interface's address, kept for host-ping
+// and display only. Global to avoid threading through newTunnel's callers.
+var (
+	scanInterface string
+	scanSourceIP  netip.Addr
+)
 
 // Registration (register.go) overwrites these in place, so var not const.
 var (

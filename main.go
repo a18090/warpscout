@@ -43,11 +43,16 @@ func main() {
 	// With -interface, interfaceAddr is the authoritative family check (per-interface,
 	// precise error); the host-wide check only runs without it.
 	if opts.iface != "" {
+		if !deviceBindSupported {
+			fmt.Fprintln(os.Stderr, errPal.fail("-interface requires Linux (SO_BINDTODEVICE)"))
+			os.Exit(1)
+		}
 		ip, err := interfaceAddr(opts.iface, opts.ipv6)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
 			os.Exit(1)
 		}
+		scanInterface = opts.iface
 		scanSourceIP = ip
 	} else if !haveAddrFamily(opts.ipv6) {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("no routable %s address on this host - nothing to scan", famName(opts.ipv6))))
