@@ -46,7 +46,7 @@ var flagGroups = []flagGroup{
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 		{"6", "ipv6", "", "scan IPv6 endpoint pools instead of IPv4"},
-		{"I", "interface", "NAME", "scan through this interface (bind to device; Linux, needs root)"},
+		{"I", "interface", "NAME", "scan and register through this interface (bind to device; Linux, may need CAP_NET_RAW)"},
 	}},
 	{"Protocol & registration", []flagSpec{
 		{"p", "proto", "wg|awg|both", "tunnel protocol: wg (WireGuard), awg (AmneziaWG), or both"},
