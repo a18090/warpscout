@@ -62,7 +62,7 @@ func anyAWG(runs []protoRun) bool {
 	return false
 }
 
-func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, sample int) ([]int, error) {
+func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, sample int, emit emitter) ([]int, error) {
 	tn, err := newTunnel(awg)
 	if err != nil {
 		return nil, err
@@ -70,14 +70,15 @@ func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout tim
 	defer tn.Close()
 
 	sampled := sampleAddrs(ips, sample)
-	if ports := probePorts(ctx, tn, sampled, primaryWarpPorts, timeout); len(ports) > 0 {
+	if ports := probePorts(ctx, tn, sampled, primaryWarpPorts, timeout, emit, "Phase 1: probing reachable WARP ports"); len(ports) > 0 {
 		return ports, nil
 	}
 	// No primary port got through: locked-down network, sweep the alternates.
-	return probePorts(ctx, tn, sampled, extendedWarpPorts, timeout), nil
+	return probePorts(ctx, tn, sampled, extendedWarpPorts, timeout, emit, "Phase 1: sweeping alternate WARP ports"), nil
 }
 
-func probePorts(ctx context.Context, tn *tunnel, ips []netip.Addr, ports []int, timeout time.Duration) []int {
+func probePorts(ctx context.Context, tn *tunnel, ips []netip.Addr, ports []int, timeout time.Duration, emit emitter, label string) []int {
+	emit(barBeginMsg{label: label, total: len(ips)})
 	open := make(map[int]bool)
 	for _, ip := range ips {
 		for _, port := range ports {
@@ -85,6 +86,7 @@ func probePorts(ctx context.Context, tn *tunnel, ips []netip.Addr, ports []int, 
 				open[port] = true
 			}
 		}
+		emit(probedMsg{})
 		if len(open) > 0 {
 			break
 		}
@@ -96,6 +98,11 @@ func probePorts(ctx context.Context, tn *tunnel, ips []netip.Addr, ports []int, 
 			out = append(out, port)
 		}
 	}
+	summary := "none reachable"
+	if len(out) > 0 {
+		summary = fmt.Sprintf("reachable ports %v", out)
+	}
+	emit(barEndMsg{label: label, summary: summary})
 	return out
 }
 

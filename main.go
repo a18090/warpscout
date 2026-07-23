@@ -107,19 +107,16 @@ func usePlainOutput(opts options) bool {
 }
 
 func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, emit emitter) ([]phaseResult, error) {
-	const phase1 = "Phase 1: probing reachable WARP ports"
-	emit(stepMsg{label: phase1})
-	open, err := reachablePorts(ctx, anyAWG(runs), ips, timeout, portProbeSample)
+	open, err := reachablePorts(ctx, anyAWG(runs), ips, timeout, portProbeSample, emit)
 	if err != nil {
-		emit(stepMsg{label: phase1, fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
+		emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
 		return nil, err
 	}
 	if len(open) == 0 {
-		emit(stepMsg{label: phase1, fail: true, summary: "no WARP port is reachable on this network"})
+		emit(stepMsg{fail: true, summary: "no WARP port is reachable on this network"})
 		return nil, fmt.Errorf("no reachable WARP port")
 	}
 	warpPorts = open
-	emit(stepMsg{label: phase1, done: true, summary: fmt.Sprintf("reachable ports %v", open)})
 
 	var phases []phaseResult
 	for _, run := range runs {
