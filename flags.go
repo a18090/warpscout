@@ -20,6 +20,7 @@ type options struct {
 	accountPath    string
 	pingCheck      bool
 	genJunk        bool
+	findJunk       bool
 	ipv6           bool
 	register       bool
 	full           bool
@@ -57,6 +58,7 @@ var flagGroups = []flagGroup{
 	}},
 	{"AmneziaWG junk parameters", []flagSpec{
 		{"", "gen-junk", "", "randomize junk params per run (overridden by -jc/-jmin/-jmax)"},
+		{"", "find-junk", "", "keep rescanning with fresh random junk params until a set unblocks every sampled endpoint, then print the command to reuse it (implies -ping, needs -proto awg)"},
 		{"", "jc", "N", "junk packet count"},
 		{"", "jmin", "N", "min junk packet size"},
 		{"", "jmax", "N", "max junk packet size"},
@@ -101,6 +103,7 @@ func parseFlags() options {
 	flag.BoolVar(&o.plain, "plain", false, "")
 	flag.BoolVar(&o.noEmoji, "no-emoji", false, "")
 	flag.BoolVar(&o.genJunk, "gen-junk", false, "")
+	flag.BoolVar(&o.findJunk, "find-junk", false, "")
 	flag.IntVar(&awgJc, "jc", awgJc, "")
 	flag.IntVar(&awgJmin, "jmin", awgJmin, "")
 	flag.IntVar(&awgJmax, "jmax", awgJmax, "")
@@ -119,8 +122,29 @@ func parseFlags() options {
 		}
 		applyGenJunk()
 	}
+	if o.findJunk {
+		applyFindJunk(&o)
+	}
 	validateJunkParams()
 	return o
+}
+
+func applyFindJunk(o *options) {
+	if o.proto != protoAWG {
+		fmt.Fprintln(os.Stderr, "-find-junk searches AmneziaWG junk params: use -proto awg")
+		os.Exit(2)
+	}
+	o.pingCheck = true
+
+	explicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "n" || f.Name == "sample" {
+			explicit = true
+		}
+	})
+	if !explicit {
+		o.perSubnet = findJunkSample
+	}
 }
 
 func applyGenJunk() {

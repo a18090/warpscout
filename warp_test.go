@@ -199,6 +199,35 @@ func TestGenJunkParams(t *testing.T) {
 	}
 }
 
+func TestJunkCommand(t *testing.T) {
+	orig := awgI1
+	defer func() { awgI1 = orig }()
+
+	c := junkCandidate{jc: 5, jmin: 22, jmax: 80}
+	awgI1 = i1Default
+	if got, want := junkCommand(c), "-proto awg -jc 5 -jmin 22 -jmax 80"; !strings.HasSuffix(got, want) {
+		t.Errorf("junkCommand() = %q, want suffix %q", got, want)
+	}
+	awgI1 = ""
+	if got := junkCommand(c); !strings.HasSuffix(got, "-i1 none") {
+		t.Errorf("junkCommand() = %q, want -i1 none", got)
+	}
+}
+
+func TestScoreJunk(t *testing.T) {
+	phases := []phaseResult{{results: []endpointResult{
+		{ok: true, durable: true},
+		{ok: true, durable: false},
+		{},
+	}}}
+	if c := scoreJunk(phases); c.working != 1 || c.total != 3 {
+		t.Errorf("scoreJunk() = %d/%d, want 1/3", c.working, c.total)
+	}
+	if c := scoreJunk(nil); c.total != 0 {
+		t.Errorf("scoreJunk(nil) total = %d, want 0", c.total)
+	}
+}
+
 func TestPeerUAPI(t *testing.T) {
 	peer, err := peerUAPI("1.2.3.4:2408")
 	if err != nil {

@@ -85,6 +85,14 @@ func main() {
 		return
 	}
 
+	if opts.findJunk {
+		if err := runFindJunk(ctx, opts, runs, timeout); err != nil {
+			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
+			os.Exit(1)
+		}
+		return
+	}
+
 	var phases []phaseResult
 	var scanErr error
 	if usePlainOutput(opts) {
