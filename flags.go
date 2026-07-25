@@ -18,6 +18,8 @@ type options struct {
 	proxy          string
 	iface          string
 	accountPath    string
+	genI1          string
+	i1Host         string
 	pingCheck      bool
 	genJunk        bool
 	findJunk       bool
@@ -56,9 +58,11 @@ var flagGroups = []flagGroup{
 		{"r", "register", "", "register a fresh WARP account, save it and exit"},
 		{"a", "account", "FILE", "cached WARP account file"},
 	}},
-	{"AmneziaWG junk parameters", []flagSpec{
+	{"AmneziaWG obfuscation parameters", []flagSpec{
 		{"", "gen-junk", "", "randomize junk params per run (overridden by -jc/-jmin/-jmax)"},
-		{"", "find-junk", "", "keep rescanning with fresh random junk params until a set unblocks every sampled endpoint, then print the command to reuse it (implies -ping, needs -proto awg)"},
+		{"", "find-junk", "", "keep rescanning with fresh random junk params (and a fresh I1 when -gen-i1 is set) until a set unblocks every sampled endpoint, then print the command to reuse it (implies -ping, needs -proto awg)"},
+		{"", "gen-i1", "PROTO", "generate the init packet per run: quic, dns, sip, stun or random"},
+		{"", "i1-sni", "HOST", "host to mimic in the generated I1 (default: a random well-known host)"},
 		{"", "jc", "N", "junk packet count"},
 		{"", "jmin", "N", "min junk packet size"},
 		{"", "jmax", "N", "max junk packet size"},
@@ -108,6 +112,8 @@ func parseFlags() options {
 	flag.IntVar(&awgJmin, "jmin", awgJmin, "")
 	flag.IntVar(&awgJmax, "jmax", awgJmax, "")
 	flag.StringVar(&awgI1, "i1", awgI1, "")
+	flag.StringVar(&o.genI1, "gen-i1", "", "")
+	flag.StringVar(&o.i1Host, "i1-sni", "", "")
 
 	flag.Usage = usage
 	flag.Parse()
@@ -122,6 +128,7 @@ func parseFlags() options {
 		}
 		applyGenJunk()
 	}
+	applyGenI1(&o)
 	if o.findJunk {
 		applyFindJunk(&o)
 	}
@@ -144,6 +151,31 @@ func applyFindJunk(o *options) {
 	})
 	if !explicit {
 		o.perSubnet = findJunkSample
+	}
+}
+
+func applyGenI1(o *options) {
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	if o.genI1 == "" {
+		if explicit["i1-sni"] {
+			fmt.Fprintln(os.Stderr, "-i1-sni needs -gen-i1 PROTO")
+			os.Exit(2)
+		}
+		return
+	}
+	if o.proto == protoWG {
+		fmt.Fprintln(os.Stderr, "-gen-i1 needs AmneziaWG: use -proto awg or -proto both")
+		os.Exit(2)
+	}
+	if explicit["i1"] {
+		fmt.Fprintln(os.Stderr, "-gen-i1 and -i1 set the same init packet: drop one")
+		os.Exit(2)
+	}
+	if err := regenI1(*o); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
 	}
 }
 
