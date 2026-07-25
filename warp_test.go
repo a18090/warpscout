@@ -200,17 +200,19 @@ func TestGenJunkParams(t *testing.T) {
 }
 
 func TestJunkCommand(t *testing.T) {
-	orig := awgI1
-	defer func() { awgI1 = orig }()
-
-	c := junkCandidate{jc: 5, jmin: 22, jmax: 80}
-	awgI1 = i1Default
+	c := junkCandidate{jc: 5, jmin: 22, jmax: 80, i1: i1Default}
 	if got, want := junkCommand(c), "-proto awg -jc 5 -jmin 22 -jmax 80"; !strings.HasSuffix(got, want) {
 		t.Errorf("junkCommand() = %q, want suffix %q", got, want)
 	}
-	awgI1 = ""
+
+	c.i1 = ""
 	if got := junkCommand(c); !strings.HasSuffix(got, "-i1 none") {
 		t.Errorf("junkCommand() = %q, want -i1 none", got)
+	}
+
+	c.i1, c.i1Label = "<r 4>", "quic(www.apple.com)"
+	if got := junkCommand(c); !strings.HasSuffix(got, `-i1 "<r 4>"`) {
+		t.Errorf("junkCommand() = %q, want the generated I1", got)
 	}
 }
 

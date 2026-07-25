@@ -15,6 +15,7 @@ const findJunkSample = 3
 type junkCandidate struct {
 	jc, jmin, jmax int
 	working, total int
+	i1, i1Label    string
 }
 
 func (c junkCandidate) String() string {
@@ -33,7 +34,13 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 	var best junkCandidate
 	for attempt := 1; ctx.Err() == nil; attempt++ {
 		genJunkParams()
-		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Attempt %d: jc=%d jmin=%d jmax=%d", attempt, awgJc, awgJmin, awgJmax)))
+		if opts.genI1 != "" {
+			if err := regenI1(opts); err != nil {
+				return err
+			}
+		}
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf(
+			"Attempt %d: jc=%d jmin=%d jmax=%d, %s", attempt, awgJc, awgJmin, awgJmax, i1Note())))
 
 		// ponytail: full runScan per candidate (incl. colo resolution) - one extra
 		// lookup per attempt buys zero new orchestration code.
@@ -65,7 +72,7 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 }
 
 func scoreJunk(phases []phaseResult) junkCandidate {
-	c := junkCandidate{jc: awgJc, jmin: awgJmin, jmax: awgJmax}
+	c := junkCandidate{jc: awgJc, jmin: awgJmin, jmax: awgJmax, i1: awgI1, i1Label: genI1Label}
 	if len(phases) == 0 {
 		return c
 	}
@@ -80,17 +87,25 @@ func scoreJunk(phases []phaseResult) junkCandidate {
 
 func reportJunk(c junkCandidate, complete bool) error {
 	fmt.Fprintln(os.Stderr)
+	note := i1NoteFor(c.i1, c.i1Label)
 	if complete {
-		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Every sampled endpoint came up with %s (%s)", c, i1Note())))
+		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Every sampled endpoint came up with %s (%s)", c, note)))
 	} else {
-		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Stopped. Best set: %s (%s)", c, i1Note())))
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Stopped. Best set: %s (%s)", c, note)))
 	}
 	fmt.Fprintln(os.Stdout, junkCommand(c))
 	return nil
 }
 
 func i1Note() string {
-	switch awgI1 {
+	return i1NoteFor(awgI1, genI1Label)
+}
+
+func i1NoteFor(i1, label string) string {
+	if label != "" {
+		return "generated " + label + " I1"
+	}
+	switch i1 {
 	case "":
 		return "no I1"
 	case i1Default:
@@ -102,10 +117,10 @@ func i1Note() string {
 func junkCommand(c junkCandidate) string {
 	parts := []string{filepath.Base(os.Args[0]), "-proto", protoAWG,
 		fmt.Sprintf("-jc %d", c.jc), fmt.Sprintf("-jmin %d", c.jmin), fmt.Sprintf("-jmax %d", c.jmax)}
-	if awgI1 == "" {
+	if c.i1 == "" {
 		parts = append(parts, "-i1 none")
-	} else if awgI1 != i1Default {
-		parts = append(parts, fmt.Sprintf("-i1 %q", awgI1))
+	} else if c.i1 != i1Default {
+		parts = append(parts, fmt.Sprintf("-i1 %q", c.i1))
 	}
 	return strings.Join(parts, " ")
 }
