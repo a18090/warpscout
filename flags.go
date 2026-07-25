@@ -19,6 +19,7 @@ type options struct {
 	iface          string
 	accountPath    string
 	pingCheck      bool
+	genJunk        bool
 	ipv6           bool
 	register       bool
 	full           bool
@@ -55,6 +56,7 @@ var flagGroups = []flagGroup{
 		{"a", "account", "FILE", "cached WARP account file"},
 	}},
 	{"AmneziaWG junk parameters", []flagSpec{
+		{"", "gen-junk", "", "randomize junk params per run (overridden by -jc/-jmin/-jmax)"},
 		{"", "jc", "N", "junk packet count"},
 		{"", "jmin", "N", "min junk packet size"},
 		{"", "jmax", "N", "max junk packet size"},
@@ -87,7 +89,7 @@ func parseFlags() options {
 	intFlag(&o.tunnelParallel, 10, "jt", "tunnel-jobs")
 	intFlag(&o.timeoutSec, 2, "t", "timeout")
 	intFlag(&o.perSubnet, 10, "n", "sample")
-	strFlag(&o.proto, "wg", "p", "proto")
+	strFlag(&o.proto, protoWG, "p", "proto")
 	strFlag(&o.output, "", "o", "output")
 	strFlag(&o.proxy, "", "x", "proxy")
 	strFlag(&o.iface, "", "I", "interface")
@@ -98,6 +100,7 @@ func parseFlags() options {
 	boolFlag(&o.full, "f", "full")
 	flag.BoolVar(&o.plain, "plain", false, "")
 	flag.BoolVar(&o.noEmoji, "no-emoji", false, "")
+	flag.BoolVar(&o.genJunk, "gen-junk", false, "")
 	flag.IntVar(&awgJc, "jc", awgJc, "")
 	flag.IntVar(&awgJmin, "jmin", awgJmin, "")
 	flag.IntVar(&awgJmax, "jmax", awgJmax, "")
@@ -106,11 +109,49 @@ func parseFlags() options {
 	flag.Usage = usage
 	flag.Parse()
 
-	if awgJmin > awgJmax {
-		fmt.Fprintf(os.Stderr, "invalid junk params: -jmin (%d) must be <= -jmax (%d)\n", awgJmin, awgJmax)
+	if o.genJunk {
+		if o.proto == protoWG {
+			fmt.Fprintln(os.Stderr, "-gen-junk needs AmneziaWG: use -proto awg or -proto both")
+			os.Exit(2)
+		}
+		applyGenJunk()
+	}
+	validateJunkParams()
+	return o
+}
+
+func applyGenJunk() {
+	explicit := map[string]bool{}
+	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	jc, jmin, jmax := awgJc, awgJmin, awgJmax
+	genJunkParams()
+	if explicit["jc"] {
+		awgJc = jc
+	}
+	if explicit["jmin"] {
+		awgJmin = jmin
+	}
+	if explicit["jmax"] {
+		awgJmax = jmax
+	}
+	junkGenerated = true
+}
+
+func validateJunkParams() {
+	fail := func(format string, args ...any) {
+		fmt.Fprintf(os.Stderr, "invalid junk params: "+format+"\n", args...)
 		os.Exit(2)
 	}
-	return o
+	if awgJc < junkCountLimitMin || awgJc > junkCountLimitMax {
+		fail("-jc (%d) must be between %d and %d", awgJc, junkCountLimitMin, junkCountLimitMax)
+	}
+	if awgJmin > awgJmax {
+		fail("-jmin (%d) must be <= -jmax (%d)", awgJmin, awgJmax)
+	}
+	if awgJmax > tunnelMTU {
+		fail("-jmax (%d) must be <= %d", awgJmax, tunnelMTU)
+	}
 }
 
 func usage() {

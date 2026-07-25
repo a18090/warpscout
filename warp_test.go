@@ -162,6 +162,29 @@ func TestBaseUAPIOverridesJunkParams(t *testing.T) {
 	}
 }
 
+func TestGenJunkParams(t *testing.T) {
+	jc, jmin, jmax := awgJc, awgJmin, awgJmax
+	defer func() { awgJc, awgJmin, awgJmax = jc, jmin, jmax }()
+
+	seen := map[int]bool{}
+	for i := 0; i < 200; i++ {
+		genJunkParams()
+		if awgJc < junkCountLimitMin || awgJc > junkCountLimitMax {
+			t.Fatalf("jc out of range: %d", awgJc)
+		}
+		if awgJmin > awgJmax {
+			t.Fatalf("jmin %d > jmax %d", awgJmin, awgJmax)
+		}
+		if awgJmax > tunnelMTU {
+			t.Fatalf("jmax exceeds MTU: %d", awgJmax)
+		}
+		seen[awgJc] = true
+	}
+	if len(seen) < 2 {
+		t.Errorf("jc never varied over 200 runs: %v", seen)
+	}
+}
+
 func TestPeerUAPI(t *testing.T) {
 	peer, err := peerUAPI("1.2.3.4:2408")
 	if err != nil {

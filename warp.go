@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"fmt"
+	"math/rand"
 	"net/netip"
 	"strings"
 )
@@ -35,6 +36,33 @@ var (
 	awgJmax = 50
 	awgI1   = "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"
 )
+
+const (
+	junkCountLimitMin = 1
+	junkCountLimitMax = 128
+)
+
+const (
+	junkCountMin = 4
+	junkCountMax = 6
+	junkSizeMin  = 10
+	junkSizeMax  = 50
+	junkSpanMin  = 20
+	junkSpanMax  = 100
+)
+
+// Set by -gen-junk (flags.go) so the report can show which params the run used.
+var junkGenerated bool
+
+func genJunkParams() {
+	awgJc = randRange(junkCountMin, junkCountMax)
+	awgJmin = randRange(junkSizeMin, junkSizeMax)
+	awgJmax = awgJmin + randRange(junkSpanMin, junkSpanMax)
+}
+
+func randRange(lo, hi int) int {
+	return lo + rand.Intn(hi-lo+1)
+}
 
 // Phase 1 probes primaryWarpPorts first; the extended set (alternate UDP ports
 // Cloudflare also serves, from CloudflareWarpSpeedTest) is only swept when no
@@ -98,15 +126,21 @@ type protoRun struct {
 	name string
 }
 
+const (
+	protoWG   = "wg"
+	protoAWG  = "awg"
+	protoBoth = "both"
+)
+
 func parseProto(p string) ([]protoRun, error) {
-	wg := protoRun{false, "wg"}
-	awg := protoRun{true, "awg"}
+	wg := protoRun{false, protoWG}
+	awg := protoRun{true, protoAWG}
 	switch p {
-	case "wg":
+	case protoWG:
 		return []protoRun{wg}, nil
-	case "awg":
+	case protoAWG:
 		return []protoRun{awg}, nil
-	case "both":
+	case protoBoth:
 		return []protoRun{wg, awg}, nil
 	default:
 		return nil, fmt.Errorf("invalid -proto %q: use wg, awg or both", p)
@@ -115,7 +149,7 @@ func parseProto(p string) ([]protoRun, error) {
 
 func protoName(awg bool) string {
 	if awg {
-		return "awg"
+		return protoAWG
 	}
-	return "wg"
+	return protoWG
 }

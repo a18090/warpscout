@@ -268,11 +268,19 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 	fmt.Fprintln(w, banner(st))
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Proto:    %s\n", st.accent.Render(strings.ToUpper(ph.run.name)))
+	writeJunkNote(w, st, ph.run.awg)
 	fmt.Fprintf(w, "Colo:     %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, coloFlag)))
 	fmt.Fprintf(w, "Regions:  %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
 	fmt.Fprintf(w, "Working:  %s\n", st.ok.Render(strconv.Itoa(len(working)))+st.dim.Render(" / ")+strconv.Itoa(len(results))+" probed")
 	writeFlakyNote(w, st, len(flaky))
 	writePicksTable(w, st, working, flaky, ping)
+}
+
+func writeJunkNote(w io.Writer, st conStyles, awg bool) {
+	if !junkGenerated || !awg {
+		return
+	}
+	fmt.Fprintf(w, "Junk:     %s\n", st.accent.Render(fmt.Sprintf("jc=%d jmin=%d jmax=%d", awgJc, awgJmin, awgJmax)))
 }
 
 func writeFlakyNote(w io.Writer, st conStyles, n int) {
@@ -411,6 +419,7 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer, p
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Working:  wg %s%sawg %s of %d probed\n",
 		st.ok.Render(strconv.Itoa(len(wgWork))), st.dim.Render(" / "), st.ok.Render(strconv.Itoa(len(awgWork))), probed)
+	writeJunkNote(w, st, true)
 	fmt.Fprintln(w)
 
 	protoStatus := func(work, flaky []endpointResult, p netip.Prefix) (string, int) {
