@@ -10,7 +10,11 @@ import (
 	"time"
 )
 
-const findJunkSample = 3
+const (
+	findJunkSample        = 3
+	findJunkQuitHint      = "q or Ctrl+C to stop and keep the best set"
+	findJunkPlainQuitHint = "Ctrl+C to stop and keep the best set"
+)
 
 type junkCandidate struct {
 	jc, jmin, jmax int
@@ -25,10 +29,14 @@ func (c junkCandidate) String() string {
 func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout time.Duration) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 
-	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf(
-		"Searching AmneziaWG junk params (%d addresses per subnet, %s). Press Ctrl+C to stop and keep the best set.",
-		opts.perSubnet, i1Note())))
+	intro := fmt.Sprintf("Searching AmneziaWG junk params (%d addresses per subnet, %s).", opts.perSubnet, i1Note())
+	if usePlainOutput(opts) {
+		intro += " Press " + findJunkPlainQuitHint + "."
+	}
+	fmt.Fprintln(os.Stderr, errPal.dim(intro))
 	fmt.Fprintln(os.Stderr)
 
 	var best junkCandidate
@@ -39,12 +47,14 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 				return err
 			}
 		}
-		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf(
-			"Attempt %d: jc=%d jmin=%d jmax=%d, %s", attempt, awgJc, awgJmin, awgJmax, i1Note())))
+		header := fmt.Sprintf("Attempt %d: jc=%d jmin=%d jmax=%d, %s", attempt, awgJc, awgJmin, awgJmax, i1Note())
+		if usePlainOutput(opts) {
+			fmt.Fprintln(os.Stderr, errPal.dim(header))
+		}
 
 		// ponytail: full runScan per candidate (incl. colo resolution) - one extra
 		// lookup per attempt buys zero new orchestration code.
-		phases, err := runScan(ctx, opts, runs, expandPools(opts.perSubnet), timeout, plainEmit)
+		phases, err := runScanUI(ctx, cancel, opts, runs, expandPools(opts.perSubnet), timeout, header, findJunkQuitHint)
 		if ctx.Err() != nil {
 			break
 		}
@@ -54,7 +64,12 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 		}
 
 		c := scoreJunk(phases)
-		fmt.Fprintln(os.Stderr, errPal.dim("Attempt "+fmt.Sprint(attempt)+": "+c.String()))
+		summary := "Attempt " + fmt.Sprint(attempt) + ": " + c.String()
+		if c.total > 0 && c.working == c.total {
+			fmt.Fprintln(os.Stderr, errPal.ok(summary))
+		} else {
+			fmt.Fprintln(os.Stderr, errPal.dim(summary))
+		}
 		fmt.Fprintln(os.Stderr)
 		if c.working > best.working {
 			best = c

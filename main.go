@@ -93,23 +93,7 @@ func main() {
 		return
 	}
 
-	var phases []phaseResult
-	var scanErr error
-	if usePlainOutput(opts) {
-		phases, scanErr = runScan(ctx, opts, runs, ips, timeout, plainEmit)
-	} else {
-		scanDone := make(chan struct{})
-		p := tea.NewProgram(newScanModel(cancel, opts.pingCheck), tea.WithOutput(os.Stderr))
-		go func() {
-			phases, scanErr = runScan(ctx, opts, runs, ips, timeout, p.Send)
-			close(scanDone)
-		}()
-		if _, err := p.Run(); err != nil {
-			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-			os.Exit(1)
-		}
-		<-scanDone
-	}
+	phases, scanErr := runScanUI(ctx, cancel, opts, runs, ips, timeout, "", "")
 	if scanErr != nil {
 		os.Exit(1)
 	}
@@ -129,6 +113,33 @@ func main() {
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
 	}
+}
+
+func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, header, quitHint string) ([]phaseResult, error) {
+	if usePlainOutput(opts) {
+		return runScan(ctx, opts, runs, ips, timeout, plainEmit)
+	}
+
+	m := newScanModel(cancel, opts.pingCheck)
+	m.header = header
+	if quitHint != "" {
+		m.quitHint = quitHint
+	}
+	p := tea.NewProgram(m, tea.WithOutput(os.Stderr))
+
+	var phases []phaseResult
+	var scanErr error
+	scanDone := make(chan struct{})
+	go func() {
+		phases, scanErr = runScan(ctx, opts, runs, ips, timeout, p.Send)
+		close(scanDone)
+	}()
+	if _, err := p.Run(); err != nil {
+		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
+		return nil, err
+	}
+	<-scanDone
+	return phases, scanErr
 }
 
 func usePlainOutput(opts options) bool {

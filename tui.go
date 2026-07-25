@@ -60,11 +60,13 @@ func plainEmit(msg tea.Msg) {
 const feedMax = 12
 
 type scanModel struct {
-	cancel context.CancelFunc
-	ping   bool
-	st     conStyles
-	spin   spinner.Model
-	bar    progress.Model
+	cancel   context.CancelFunc
+	ping     bool
+	header   string
+	quitHint string
+	st       conStyles
+	spin     spinner.Model
+	bar      progress.Model
 
 	lines []string
 	step  string
@@ -82,11 +84,12 @@ func newScanModel(cancel context.CancelFunc, ping bool) scanModel {
 	sp.Spinner = spinner.Dot
 	sp.Style = st.accent
 	return scanModel{
-		cancel: cancel,
-		ping:   ping,
-		st:     st,
-		spin:   sp,
-		bar:    progress.New(progress.WithDefaultGradient(), progress.WithWidth(28)),
+		cancel:   cancel,
+		ping:     ping,
+		quitHint: "q to quit",
+		st:       st,
+		spin:     sp,
+		bar:      progress.New(progress.WithDefaultGradient(), progress.WithWidth(28)),
 	}
 }
 
@@ -178,7 +181,11 @@ func (m foundMsg) lossStr() string {
 func (m scanModel) View() string {
 	st := m.st
 	var b strings.Builder
-	b.WriteString(banner(st) + "\n\n")
+	if m.header != "" {
+		b.WriteString(st.title.Render(m.header) + "\n\n")
+	} else {
+		b.WriteString(banner(st) + "\n\n")
+	}
 
 	for _, l := range m.lines {
 		b.WriteString(l + "\n")
@@ -195,7 +202,7 @@ func (m scanModel) View() string {
 		b.WriteString("\n" + m.renderFeed())
 	}
 	if !m.finished {
-		b.WriteString("\n" + st.dim.Render("q to quit") + "\n")
+		b.WriteString("\n" + st.dim.Render(m.quitHint) + "\n")
 	}
 	return b.String()
 }
