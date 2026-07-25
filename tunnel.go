@@ -65,10 +65,10 @@ func newTunnel(awg bool) (*tunnel, error) {
 
 func (t *tunnel) Close() { t.dev.Close() }
 
-func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int) (tr traceResult, endpoint string, ok bool, rtt time.Duration, loss float32, flaky bool) {
+func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int, wantTrace bool) (tr traceResult, endpoint string, ok bool, rtt time.Duration, loss float32, flaky bool) {
 	for _, port := range warpPorts {
 		endpoint = net.JoinHostPort(ip.String(), strconv.Itoa(port))
-		if tr, rtt, loss, flaky, ok = t.traceEndpoint(ctx, endpoint, timeout, pings); ok {
+		if tr, rtt, loss, flaky, ok = t.traceEndpoint(ctx, endpoint, timeout, pings, wantTrace); ok {
 			return tr, endpoint, true, rtt, loss, flaky
 		}
 	}
@@ -95,7 +95,7 @@ func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Du
 	return waitHandshake(ctx, t.dev, timeout)
 }
 
-func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int) (tr traceResult, rtt time.Duration, loss float32, flaky, ok bool) {
+func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int, wantTrace bool) (tr traceResult, rtt time.Duration, loss float32, flaky, ok bool) {
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
 		return traceResult{}, 0, 0, false, false
@@ -108,6 +108,16 @@ func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout tim
 	// is dropped by the not-yet-established peer and netstack stalls past timeout.
 	if !waitHandshake(ctx, t.dev, timeout) {
 		return traceResult{}, 0, 0, false, false
+	}
+
+	// ponytail: -find-junk only asks whether the peer comes up, and the durability
+	// ping already proves the tunnel passes data - the trace fetch adds nothing.
+	if !wantTrace {
+		if pings <= 0 {
+			return traceResult{}, 0, 0, false, true
+		}
+		rtt, loss, flaky = t.durability(pings, timeout)
+		return traceResult{}, rtt, loss, flaky, true
 	}
 
 	body, ok := t.fetch(ctx, timeout)

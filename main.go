@@ -161,6 +161,8 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 	}
 	warpPorts = open
 
+	wantTrace := !opts.findJunk
+
 	var phases []phaseResult
 	for _, run := range runs {
 		results := make([]endpointResult, len(ips))
@@ -182,7 +184,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 			defer emit(probedMsg{})
 			ip := ips[i]
 			r := endpointResult{ip: ip}
-			if t, endpoint, ok, rtt, loss, flaky := tn.trace(ctx, ip, timeout, pings); ok {
+			if t, endpoint, ok, rtt, loss, flaky := tn.trace(ctx, ip, timeout, pings, wantTrace); ok {
 				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
 				if pings > 0 {
 					r.rtt, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
@@ -190,7 +192,11 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 				if hrtt, pok := pingHost(ip, timeout); pok {
 					r.latency = hrtt
 				}
-				emit(foundMsg{endpoint: endpoint, latency: r.ping(), loss: r.loss, measured: r.measured, exit: exitRegion(t), colo: exitColo(t), flaky: !r.durable})
+				found := foundMsg{endpoint: endpoint, latency: r.ping(), loss: r.loss, measured: r.measured, flaky: !r.durable}
+				if wantTrace {
+					found.exit, found.colo = exitRegion(t), exitColo(t)
+				}
+				emit(found)
 			}
 			results[i] = r
 		}
@@ -202,10 +208,12 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 		phases = append(phases, phaseResult{run, results})
 	}
 
-	const coloStep = "Resolving exit regions"
-	emit(stepMsg{label: coloStep})
-	coloISO = resolveColoISO(ctx, exitColosOf(phases))
-	emit(stepMsg{label: coloStep, done: true, summary: "done"})
+	if wantTrace {
+		const coloStep = "Resolving exit regions"
+		emit(stepMsg{label: coloStep})
+		coloISO = resolveColoISO(ctx, exitColosOf(phases))
+		emit(stepMsg{label: coloStep, done: true, summary: "done"})
+	}
 
 	emit(doneMsg{})
 	return phases, nil
