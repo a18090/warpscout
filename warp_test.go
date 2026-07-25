@@ -141,10 +141,24 @@ func TestBaseUAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"jc=6", "jmin=10", "jmax=50", "i1="} {
+	for _, want := range []string{"jc=6", "jmin=10", "jmax=50", "i1=" + i1Default} {
 		if !strings.Contains(awg, want) {
 			t.Errorf("AmneziaWG config missing %q", want)
 		}
+	}
+}
+
+func TestBaseUAPINoInitPacket(t *testing.T) {
+	orig := awgI1
+	defer func() { awgI1 = orig }()
+
+	awgI1 = ""
+	awg, err := baseUAPI(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(awg, "i1=") {
+		t.Errorf("init packet must be omitted when empty: %q", awg)
 	}
 }
 

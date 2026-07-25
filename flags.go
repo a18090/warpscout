@@ -60,7 +60,7 @@ var flagGroups = []flagGroup{
 		{"", "jc", "N", "junk packet count"},
 		{"", "jmin", "N", "min junk packet size"},
 		{"", "jmax", "N", "max junk packet size"},
-		{"", "i1", "PKT", "custom init packet (default: built-in iCloud probe)"},
+		{"", "i1", "PKT", "custom init packet, or \"none\" to send none (default: built-in iCloud probe)"},
 	}},
 	{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
@@ -109,6 +109,9 @@ func parseFlags() options {
 	flag.Usage = usage
 	flag.Parse()
 
+	if awgI1 == i1Keyword {
+		awgI1 = ""
+	}
 	if o.genJunk {
 		if o.proto == protoWG {
 			fmt.Fprintln(os.Stderr, "-gen-junk needs AmneziaWG: use -proto awg or -proto both")

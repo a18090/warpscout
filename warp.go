@@ -34,7 +34,12 @@ var (
 	awgJc   = 6
 	awgJmin = 10
 	awgJmax = 50
-	awgI1   = "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"
+	awgI1   = i1Default
+)
+
+const (
+	i1Keyword = "none"
+	i1Default = "<r 2><b 0x858000010001000000000669636c6f756403636f6d0000010001c00c000100010000105a00044d583737>"
 )
 
 const (
@@ -101,7 +106,9 @@ func baseUAPI(awg bool) (string, error) {
 		fmt.Fprintf(&b, "jc=%d\n", awgJc)
 		fmt.Fprintf(&b, "jmin=%d\n", awgJmin)
 		fmt.Fprintf(&b, "jmax=%d\n", awgJmax)
-		fmt.Fprintf(&b, "i1=%s\n", awgI1)
+		if awgI1 != "" {
+			fmt.Fprintf(&b, "i1=%s\n", awgI1)
+		}
 	}
 	return b.String(), nil
 }
