@@ -350,3 +350,26 @@ func TestExpandV6(t *testing.T) {
 		}
 	}
 }
+
+func TestRegI1Candidates(t *testing.T) {
+	const cur = "<b 0xdead>"
+	if got := regI1Candidates(false, options{}, cur, ""); len(got) != 1 || got[0].chain != cur {
+		t.Errorf("wg candidates = %v, want the current I1 only", got)
+	}
+	if got := regI1Candidates(true, options{i1Explicit: true}, cur, "x"); len(got) != 1 || got[0].chain != cur {
+		t.Errorf("explicit I1 candidates = %v, want the current I1 only", got)
+	}
+
+	got := regI1Candidates(true, options{}, cur, "")
+	if want := 1 + len(i1Profiles()); len(got) != want {
+		t.Fatalf("awg candidates = %d, want %d", len(got), want)
+	}
+	if got[0].chain != i1Default || got[0].label != "" {
+		t.Errorf("first candidate = %+v, want the default probe", got[0])
+	}
+	for _, c := range got[1:] {
+		if c.chain == "" || c.label == "" {
+			t.Errorf("generated candidate %+v is incomplete", c)
+		}
+	}
+}

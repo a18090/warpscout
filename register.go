@@ -251,9 +251,9 @@ const tunnelDiscoverySample = 64
 
 const tunnelDiscoveryBudget = 40 * time.Second
 
-func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr, timeout time.Duration, plain bool) (account, error) {
-	if proxy != "" {
-		c, err := proxyClient(proxy)
+func obtainAccount(ctx context.Context, o options, awg bool, ips []netip.Addr, timeout time.Duration) (account, error) {
+	if o.proxy != "" {
+		c, err := proxyClient(o.proxy)
 		if err != nil {
 			return account{}, err
 		}
@@ -270,20 +270,56 @@ func obtainAccount(ctx context.Context, awg bool, proxy string, ips []netip.Addr
 	fmt.Fprintln(os.Stderr, errPal.dim("Registering through a WARP tunnel (pass -proxy to use a proxy instead)"))
 
 	sampled := sampleAddrs(ips, tunnelDiscoverySample)
+	origI1, origLabel := awgI1, genI1Label
 	var lastErr error
 	for _, p := range []bool{awg, !awg} {
-		onProbe := discoveryProgress(protoName(p), len(sampled), plain)
-		a, err := registerViaTunnel(ctx, p, sampled, timeout, onProbe)
-		if onProbe != nil {
-			fmt.Fprintln(os.Stderr)
+		for _, c := range regI1Candidates(p, o, origI1, origLabel) {
+			// newTunnel bakes the globals into the UAPI config, so set them first.
+			awgI1, genI1Label = c.chain, c.label
+			label := protoName(p)
+			if p && !o.i1Explicit {
+				label += fmt.Sprintf(" (%s)", i1NoteFor(c.chain, c.label))
+			}
+			onProbe := discoveryProgress(label, len(sampled), usePlainOutput(o))
+			a, err := registerViaTunnel(ctx, p, sampled, timeout, onProbe)
+			if onProbe != nil {
+				fmt.Fprintln(os.Stderr)
+			}
+			if err == nil {
+				reportRegI1(origI1)
+				return a, nil
+			}
+			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("  %s: %v", label, err)))
+			lastErr = err
 		}
-		if err == nil {
-			return a, nil
-		}
-		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("  %s: %v", protoName(p), err)))
-		lastErr = err
 	}
+	awgI1, genI1Label = origI1, origLabel
 	return account{}, lastErr
+}
+
+type i1Candidate struct{ chain, label string }
+
+// Only awg carries an I1, and an explicit -i1/-gen-i1 is the user's choice - the
+// fallback sweep only replaces the default probe when DPI drops it.
+func regI1Candidates(awg bool, o options, curChain, curLabel string) []i1Candidate {
+	if !awg || o.i1Explicit {
+		return []i1Candidate{{curChain, curLabel}}
+	}
+	cands := []i1Candidate{{i1Default, ""}}
+	for _, p := range i1Profiles() {
+		if chain, label, err := genI1(p, o.i1Host); err == nil {
+			cands = append(cands, i1Candidate{chain, label})
+		}
+	}
+	return cands
+}
+
+func reportRegI1(origI1 string) {
+	if awgI1 == origI1 {
+		return
+	}
+	fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered with the %s - reusing it for this run", i1Note())))
+	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("  reuse it later with: -i1 %q", awgI1)))
 }
 
 const discoveryBarWidth = 28
@@ -291,8 +327,8 @@ const discoveryBarWidth = 28
 // discoveryProgress returns an onProbe callback that renders an inline bar to
 // stderr as endpoints are probed. In plain (non-TTY) mode it prints a single
 // static line and returns nil, since a redrawing bar needs a terminal.
-func discoveryProgress(proto string, total int, plain bool) func(probed int) {
-	label := fmt.Sprintf("probing %s endpoints", proto)
+func discoveryProgress(what string, total int, plain bool) func(probed int) {
+	label := fmt.Sprintf("probing %s endpoints", what)
 	if plain {
 		fmt.Fprintf(os.Stderr, "  %s...\n", label)
 		return nil

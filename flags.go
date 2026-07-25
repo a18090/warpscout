@@ -20,6 +20,7 @@ type options struct {
 	accountPath    string
 	genI1          string
 	i1Host         string
+	i1Explicit     bool
 	pingCheck      bool
 	genJunk        bool
 	findJunk       bool
@@ -157,6 +158,7 @@ func applyFindJunk(o *options) {
 func applyGenI1(o *options) {
 	explicit := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	o.i1Explicit = explicit["i1"] || o.genI1 != ""
 
 	if o.genI1 == "" {
 		if explicit["i1-sni"] {
