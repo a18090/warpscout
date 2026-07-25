@@ -162,7 +162,6 @@ func applyGenJunk() {
 	if explicit["jmax"] {
 		awgJmax = jmax
 	}
-	junkGenerated = true
 }
 
 func validateJunkParams() {

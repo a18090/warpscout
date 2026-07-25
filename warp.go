@@ -56,9 +56,6 @@ const (
 	junkSpanMax  = 100
 )
 
-// Set by -gen-junk (flags.go) so the report can show which params the run used.
-var junkGenerated bool
-
 func genJunkParams() {
 	awgJc = randRange(junkCountMin, junkCountMax)
 	awgJmin = randRange(junkSizeMin, junkSizeMax)

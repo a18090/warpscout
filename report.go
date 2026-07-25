@@ -277,10 +277,12 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 }
 
 func writeJunkNote(w io.Writer, st conStyles, awg bool) {
-	if !junkGenerated || !awg {
+	if !awg {
 		return
 	}
-	fmt.Fprintf(w, "Junk:     %s\n", st.accent.Render(fmt.Sprintf("jc=%d jmin=%d jmax=%d", awgJc, awgJmin, awgJmax)))
+	fmt.Fprintf(w, "Junk:     %s %s\n",
+		st.accent.Render(fmt.Sprintf("jc=%d jmin=%d jmax=%d", awgJc, awgJmin, awgJmax)),
+		st.dim.Render("("+i1Note()+")"))
 }
 
 func writeFlakyNote(w io.Writer, st conStyles, n int) {
