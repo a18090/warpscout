@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/netip"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -229,16 +228,8 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 	for _, run := range runs {
 		results := make([]endpointResult, len(ips))
 		pings := 0
-		parallel := opts.tunnelParallel
 		if opts.pingCheck {
 			pings = durabilityPings
-			// RTT/loss is timing-sensitive; running many userspace tunnels per core
-			// starves the netstack and fakes packet loss (false flaky). Narrow the
-			// pool to the core count so each ping burst gets a real timeslice.
-			if cores := runtime.GOMAXPROCS(0); cores < parallel {
-				parallel = cores
-				emit(stepMsg{done: true, label: "Ping mode", summary: fmt.Sprintf("tunnel jobs capped to %d (cores) for accurate RTT/loss", parallel)})
-			}
 		}
 		label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
 		emit(barBeginMsg{label: label, total: len(ips)})
@@ -262,7 +253,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 			}
 			results[i] = r
 		}
-		if err := runTunnelPool(parallel, run.awg, len(ips), work); err != nil {
+		if err := runTunnelPool(opts.tunnelParallel, run.awg, len(ips), work); err != nil {
 			emit(stepMsg{fail: true, summary: err.Error()})
 			return nil, err
 		}

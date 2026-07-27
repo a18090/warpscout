@@ -106,6 +106,8 @@ var (
 	}}
 )
 
+const defaultTunnelJobs = 10
+
 func intFlag(fs *flag.FlagSet, p *int, def int, short, long string) {
 	fs.IntVar(p, short, def, "")
 	fs.IntVar(p, long, def, "")
@@ -146,7 +148,7 @@ func addI1GenFlags(fs *flag.FlagSet, o *options) {
 func setupScanFlags(fs *flag.FlagSet, o *options) {
 	addNetFlags(fs, o)
 	addAWGFlags(fs, o)
-	intFlag(fs, &o.tunnelParallel, 10, "jt", "tunnel-jobs")
+	intFlag(fs, &o.tunnelParallel, defaultTunnelJobs, "jt", "tunnel-jobs")
 	intFlag(fs, &o.perSubnet, 5, "n", "sample")
 	strFlag(fs, &o.proto, protoWG, "p", "proto")
 	strFlag(fs, &o.output, "", "o", "output")
@@ -173,7 +175,7 @@ func setupRegisterFlags(fs *flag.FlagSet, o *options) {
 func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
 	addNetFlags(fs, o)
 	addI1GenFlags(fs, o)
-	intFlag(fs, &o.tunnelParallel, 10, "jt", "tunnel-jobs")
+	intFlag(fs, &o.tunnelParallel, defaultTunnelJobs, "jt", "tunnel-jobs")
 	intFlag(fs, &o.perSubnet, findJunkSample, "n", "sample")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	o.proto = protoAWG

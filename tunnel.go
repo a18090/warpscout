@@ -134,8 +134,8 @@ func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout tim
 // durability runs a ping burst and, only if it looks torn down, confirms with a
 // second burst. A real TSPU teardown stays dead across both; transient loss does
 // not. The trustworthy (second) burst's numbers are reported when the first was
-// just noise. Measurement runs right after the trace (fresh handshake) and, under
-// -ping, the worker pool is narrowed to the core count so bursts are not starved.
+// just noise. Measurement runs right after the trace, so the burst reads the
+// tunnel's state after a real request has already given TSPU something to kill.
 func (t *tunnel) durability(count int, timeout time.Duration) (time.Duration, float32, bool) {
 	rtt, loss, torn := t.tunnelPing(count, timeout)
 	if !torn {
