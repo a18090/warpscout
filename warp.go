@@ -66,11 +66,10 @@ func randRange(lo, hi int) int {
 	return lo + rand.Intn(hi-lo+1)
 }
 
-// Phase 1 probes primaryWarpPorts first; the extended set (alternate UDP ports
-// Cloudflare also serves, from CloudflareWarpSpeedTest) is only swept when no
-// primary port gets through, so a restrictive network still has a chance without
-// making every scan pay 50 extra per-port timeouts. warpPorts holds the ports
-// phase 1 found open and is what phase 2 iterates.
+// The extended set (alternate UDP ports Cloudflare also serves, from
+// CloudflareWarpSpeedTest) is only swept when no primary port gets through, so
+// a restrictive network still has a chance without making every scan pay 50
+// extra per-port timeouts. warpPorts holds what phase 1 found open.
 var (
 	primaryWarpPorts  = []int{2408, 500, 1701, 4500}
 	extendedWarpPorts = []int{

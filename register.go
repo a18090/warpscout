@@ -326,9 +326,8 @@ func reportRegI1(origI1 string) {
 
 const discoveryBarWidth = 28
 
-// discoveryProgress returns an onProbe callback that renders an inline bar to
-// stderr as endpoints are probed. In plain (non-TTY) mode it prints a single
-// static line and returns nil, since a redrawing bar needs a terminal.
+// A redrawing bar needs a terminal, so plain mode prints one static line and
+// returns no callback.
 func discoveryProgress(what string, total int, plain bool) func(probed int) {
 	label := fmt.Sprintf("probing %s endpoints", what)
 	if plain {
@@ -341,10 +340,8 @@ func discoveryProgress(what string, total int, plain bool) func(probed int) {
 	}
 }
 
-// registerViaTunnel sweeps candidate endpoints (reporting progress) and registers
-// through the first that completes a handshake, reusing that live tunnel. The
-// handshake is the only reachability test that survives the DPI which forced the
-// tunnel fallback in the first place.
+// The handshake is the only reachability test that survives the DPI which
+// forced the tunnel fallback in the first place.
 func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, onProbe func(probed int)) (account, error) {
 	tn, err := newTunnel(awg)
 	if err != nil {

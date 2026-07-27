@@ -10,12 +10,10 @@ import (
 
 const deviceBindSupported = true
 
-// deviceControl returns a net.ListenConfig/net.Dialer Control that pins the
-// socket to iface via SO_BINDTODEVICE, so traffic egresses through that
-// interface (including a tun) rather than the default route. Needs CAP_NET_RAW.
-// A positive maxseg clamps TCP MSS: a tun that advertises a large MTU but really
-// egresses over a smaller internet path PMTU-blackholes big TLS records, so
-// registration over such an interface must cap the segment size.
+// SO_BINDTODEVICE needs CAP_NET_RAW. A positive maxseg clamps TCP MSS: a tun
+// that advertises a large MTU but really egresses over a smaller internet path
+// PMTU-blackholes big TLS records, so registration over such an interface must
+// cap the segment size.
 func deviceControl(iface string, maxseg int) func(network, address string, c syscall.RawConn) error {
 	return func(_, _ string, c syscall.RawConn) error {
 		var opErr error

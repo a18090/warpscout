@@ -147,8 +147,8 @@ func exitColosOf(phases []phaseResult) []string {
 	return colos
 }
 
-// poolsWithHits drops the subnets a filter left empty; an empty row is only
-// worth showing when the scan really covered the whole subnet.
+// An empty row is only worth showing when the scan really covered the whole
+// subnet, so subnets a filter emptied are dropped.
 func poolsWithHits(phases []phaseResult) []netip.Prefix {
 	out := make([]netip.Prefix, 0, len(pools))
 	for _, p := range pools {
@@ -199,9 +199,8 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 	return out
 }
 
-// lessByLossRTT ranks lowest packet loss first, then lowest ping, mirroring
-// CloudflareWarpSpeedTest. Unmeasured endpoints carry loss 0, so without -ping
-// this degrades to the previous ping-only ordering.
+// Loss before ping, mirroring CloudflareWarpSpeedTest. Unmeasured endpoints
+// carry loss 0, so without -ping this degrades to ping-only ordering.
 func lessByLossRTT(a, b endpointResult) bool {
 	if a.loss != b.loss {
 		return a.loss < b.loss
@@ -350,8 +349,6 @@ func lossHeader(ping bool) []string {
 	return []string{"LOSS"}
 }
 
-// metricCols returns the columns to accent (PING, plus LOSS when shown) so the
-// StyleFunc stays correct whether or not the LOSS column is present.
 func metricCols(ping bool, pingCol int) map[int]bool {
 	cols := map[int]bool{pingCol: true}
 	if ping {

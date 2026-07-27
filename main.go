@@ -12,10 +12,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// setupScan resolves everything a command needs before touching the network:
-// protocol runs, the pool selection (-6/-target), the source interface and the
-// sampled addresses. register needs it too - its tunnel fallback registers
-// through one of these addresses.
+// register needs this too - its tunnel fallback registers through one of the
+// sampled addresses.
 func setupScan(opts options) ([]protoRun, []netip.Addr, error) {
 	runs, err := parseProto(opts.proto)
 	if err != nil {

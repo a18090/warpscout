@@ -31,8 +31,8 @@ var poolsV6 = []netip.Prefix{
 
 var pools = poolsV4
 
-// ponytail: /20 is 4096 hosts, plenty for a -target; anything wider is what the
-// built-in pools are for, and expandV4 would enumerate the whole range.
+// Anything wider than /20 is what the built-in pools are for, and expandV4
+// would enumerate the whole range.
 const targetMinBitsV4 = 20
 
 func parseTargets(spec string) ([]netip.Prefix, error) {
@@ -102,8 +102,8 @@ func expandV6(p netip.Prefix, perSubnet int) []netip.Addr {
 		count = 256
 	}
 	base := p.Masked().Addr().As16()
-	// ponytail: random bytes below the prefix, mirrors upstream endpoint6()
-	// (hextet 4 stays 0 for the /48 pools)
+	// Random bytes below the prefix, mirroring upstream endpoint6(): hextet 4
+	// stays 0 for the /48 pools.
 	start := max(8, (p.Bits()+7)/8)
 	if start == 16 {
 		return []netip.Addr{p.Addr()}

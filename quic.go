@@ -38,8 +38,8 @@ func genQUICI1(sni string) (string, []byte, error) {
 }
 
 func quicInitialPacket(dcid, pkn, payload []byte) ([]byte, int, error) {
-	// ponytail: no PADDING frame - our ClientHello already puts the packet well
-	// over the 20-byte minimum the header protection sample needs.
+	// No PADDING frame: the ClientHello already puts the packet well over the
+	// 20-byte minimum the header protection sample needs.
 	header := []byte{0xC0 | byte(len(pkn)-1)}
 	header = binary.BigEndian.AppendUint32(header, quicVersion1)
 	header = append(header, quicStr8(dcid)...)

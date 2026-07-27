@@ -110,8 +110,8 @@ func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout tim
 		return traceResult{}, 0, 0, false, false
 	}
 
-	// ponytail: -find-junk only asks whether the peer comes up, and the durability
-	// ping already proves the tunnel passes data - the trace fetch adds nothing.
+	// find-junk only asks whether the peer comes up, and the durability ping
+	// already proves the tunnel passes data - the trace fetch adds nothing.
 	if !wantTrace {
 		if pings <= 0 {
 			return traceResult{}, 0, 0, false, true
@@ -131,11 +131,10 @@ func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout tim
 	return parseTrace(body), rtt, loss, flaky, true
 }
 
-// durability runs a ping burst and, only if it looks torn down, confirms with a
-// second burst. A real DPI teardown stays dead across both; transient loss does
-// not. The trustworthy (second) burst's numbers are reported when the first was
-// just noise. Measurement runs right after the trace, so the burst reads the
-// tunnel's state after a real request has already given DPI something to kill.
+// A real DPI teardown stays dead across both bursts; transient loss does not,
+// so the second burst's numbers are the ones reported when the first was noise.
+// Running right after the trace lets the burst read the tunnel's state once a
+// real request has already given DPI something to kill.
 func (t *tunnel) durability(count int, timeout time.Duration) (time.Duration, float32, bool) {
 	rtt, loss, torn := t.tunnelPing(count, timeout)
 	if !torn {
@@ -169,13 +168,10 @@ const (
 	minDurabilityPings = 5
 )
 
-// tunnelPing pushes ICMP echoes to 1.1.1.1 through the live tunnel - the only way
-// to catch a peer that handshakes but gets its data flow dropped by DPI. Echoes
-// are spread over time (to give DPI traffic to react to) but replies are matched
-// by sequence and collected in a shared window, so a reply merely delayed by a
-// contended netstack (many userspace tunnels running at once) still counts rather
-// than being scored as a loss. Returns average RTT, loss fraction (diagnostic),
-// and whether the tunnel looks torn down (a trailing run of unanswered echoes).
+// Echoes are spread over time to give DPI traffic to react to, but replies are
+// matched by sequence in a shared window: a reply merely delayed by a contended
+// netstack (many userspace tunnels at once) still counts instead of scoring as
+// a loss.
 func (t *tunnel) tunnelPing(count int, timeout time.Duration) (time.Duration, float32, bool) {
 	dst := netip.MustParseAddr(pingTarget)
 	pc, err := t.tnet.DialPingAddr(netip.Addr{}, dst)
@@ -257,8 +253,8 @@ func lossFraction(got, count int) float32 {
 	return float32(count-got) / float32(count)
 }
 
-// teardown reports a trailing run of at least flakyTailFails unanswered echoes:
-// the tunnel stopped passing traffic and did not come back.
+// A trailing run of at least flakyTailFails unanswered echoes means the tunnel
+// stopped passing traffic and did not come back.
 func teardown(results []bool) bool {
 	if len(results) < flakyTailFails {
 		return false

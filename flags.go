@@ -377,7 +377,6 @@ func flagColumnWidth(groups []flagGroup) int {
 
 func defaultNote(st conStyles, fs *flag.FlagSet, long string) string {
 	f := fs.Lookup(long)
-	// A zero default always means "off/unset" here, and the help text says so.
 	if f == nil || f.DefValue == "" || f.DefValue == "false" || f.DefValue == "0" {
 		return ""
 	}

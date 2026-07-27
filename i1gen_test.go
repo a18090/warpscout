@@ -14,9 +14,7 @@ import (
 const testI1Host = "www.example.com"
 
 // The whole point of the QUIC profile: a DPI that derives the Initial keys from
-// the DCID must be able to decrypt the packet and find a real ClientHello. If
-// any step of the key schedule, the nonce or the header protection is wrong,
-// gcm.Open fails here.
+// the DCID must be able to decrypt the packet and find a real ClientHello.
 func TestGenQUICI1Decrypts(t *testing.T) {
 	chain, packet, err := genQUICI1(testI1Host)
 	if err != nil {

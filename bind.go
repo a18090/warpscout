@@ -9,10 +9,8 @@ import (
 	"github.com/amnezia-vpn/amneziawg-go/conn"
 )
 
-// deviceBind is a minimal conn.Bind that pins the tunnel's outer UDP socket to a
-// chosen interface via SO_BINDTODEVICE (deviceControl), so scan traffic egresses
-// through that interface - including a tun, which source-IP binding cannot route
-// into.
+// SO_BINDTODEVICE rather than a source-IP bind, which cannot route traffic into
+// a tun.
 type deviceBind struct {
 	iface string
 	conn  *net.UDPConn

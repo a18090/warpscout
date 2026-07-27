@@ -52,8 +52,6 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 			fmt.Fprintln(os.Stderr, errPal.dim(header))
 		}
 
-		// ponytail: full runScan per candidate - reusing the scan orchestration
-		// (minus the trace fetch, see traceEndpoint) beats a bespoke probe loop.
 		phases, err := runScanUI(ctx, cancel, opts, runs, expandPools(opts.perSubnet), timeout, header, findJunkQuitHint)
 		if ctx.Err() != nil {
 			break
