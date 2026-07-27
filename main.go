@@ -82,6 +82,9 @@ func runRegisterCmd(ctx context.Context, opts options) error {
 }
 
 func runFindJunkCmd(ctx context.Context, opts options) error {
+	if opts.junkThreshold < 1 || opts.junkThreshold > 100 {
+		return fmt.Errorf("-threshold (%d) must be between 1 and 100", opts.junkThreshold)
+	}
 	if err := loadScanAccount(opts.accountPath); err != nil {
 		return err
 	}

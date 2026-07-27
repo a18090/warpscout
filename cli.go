@@ -52,8 +52,8 @@ var commands = []command{
 		brief: "search AmneziaWG junk params that unblock every endpoint",
 		intro: []string{
 			"Rescans with a fresh random junk set (and a fresh I1 when -gen-i1 is set)",
-			"until one set brings up every sampled endpoint, then prints the scan",
-			"command to reuse it. Ctrl+C keeps the best set so far.",
+			"until one set brings up the -threshold share of the sampled endpoints,",
+			"then prints the scan command to reuse it. Ctrl+C keeps the best set so far.",
 			"",
 			"Verifies by handshake and in-tunnel ping only - no exit colo is resolved.",
 		},

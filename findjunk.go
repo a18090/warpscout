@@ -6,12 +6,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
 
 const (
 	findJunkSample        = 3
+	defaultJunkThreshold  = 95
 	findJunkQuitHint      = "q or Ctrl+C to stop and keep the best set"
 	findJunkPlainQuitHint = "Ctrl+C to stop and keep the best set"
 )
@@ -20,6 +22,10 @@ type junkCandidate struct {
 	jc, jmin, jmax int
 	working, total int
 	i1, i1Label    string
+}
+
+func (c junkCandidate) meets(pct int) bool {
+	return c.total > 0 && c.working*100 >= c.total*pct
 }
 
 func (c junkCandidate) String() string {
@@ -63,7 +69,7 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 
 		c := scoreJunk(phases)
 		summary := "Attempt " + fmt.Sprint(attempt) + ": " + c.String()
-		if c.total > 0 && c.working == c.total {
+		if c.meets(opts.junkThreshold) {
 			fmt.Fprintln(os.Stderr, errPal.ok(summary))
 		} else {
 			fmt.Fprintln(os.Stderr, errPal.dim(summary))
@@ -72,7 +78,7 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 		if c.working > best.working {
 			best = c
 		}
-		if c.total > 0 && c.working == c.total {
+		if c.meets(opts.junkThreshold) {
 			return reportJunk(c, true)
 		}
 	}
@@ -102,11 +108,16 @@ func reportJunk(c junkCandidate, complete bool) error {
 	fmt.Fprintln(os.Stderr)
 	note := i1NoteFor(c.i1, c.i1Label)
 	if complete {
-		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Every sampled endpoint came up with %s (%s)", c, note)))
+		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Good enough: %s (%s)", c, note)))
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Stopped. Best set: %s (%s)", c, note)))
 	}
-	fmt.Fprintln(os.Stdout, junkCommand(c))
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprintln(os.Stderr, errPal.title("Ready-to-run scan command with these parameters:"))
+	fmt.Fprintln(os.Stderr)
+	outPal := palette{enabled: colorEnabled(os.Stdout)}
+	fmt.Fprintln(os.Stdout, outPal.accent(junkCommand(c)))
+	fmt.Fprintln(os.Stderr)
 	return nil
 }
 
@@ -127,8 +138,19 @@ func i1NoteFor(i1, label string) string {
 	return "custom I1"
 }
 
+func runnableBinary() string {
+	name := filepath.Base(os.Args[0])
+	if runtime.GOOS != "windows" {
+		return "./" + name
+	}
+	if !strings.HasSuffix(strings.ToLower(name), ".exe") {
+		name += ".exe"
+	}
+	return name
+}
+
 func junkCommand(c junkCandidate) string {
-	parts := []string{filepath.Base(os.Args[0]), "scan", "-proto", protoAWG,
+	parts := []string{runnableBinary(), "scan", "-proto", protoAWG,
 		fmt.Sprintf("-jc %d", c.jc), fmt.Sprintf("-jmin %d", c.jmin), fmt.Sprintf("-jmax %d", c.jmax)}
 	if c.i1 == "" {
 		parts = append(parts, "-i1 none")

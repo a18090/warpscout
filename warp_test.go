@@ -444,3 +444,22 @@ func TestRegI1Candidates(t *testing.T) {
 		}
 	}
 }
+
+func TestJunkCandidateMeets(t *testing.T) {
+	cases := []struct {
+		working, total, pct int
+		want                bool
+	}{
+		{40, 42, defaultJunkThreshold, true},
+		{39, 42, defaultJunkThreshold, false},
+		{42, 42, 100, true},
+		{41, 42, 100, false},
+		{0, 0, defaultJunkThreshold, false},
+	}
+	for _, c := range cases {
+		got := junkCandidate{working: c.working, total: c.total}.meets(c.pct)
+		if got != c.want {
+			t.Errorf("%d/%d at %d%% = %v, want %v", c.working, c.total, c.pct, got, c.want)
+		}
+	}
+}

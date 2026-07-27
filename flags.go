@@ -16,6 +16,7 @@ type options struct {
 	timeoutSec     int
 	perSubnet      int
 	pingCount      int
+	junkThreshold  int
 	proto          string
 	output         string
 	proxy          string
@@ -96,6 +97,7 @@ var (
 	findJunkGroup = flagGroup{"Search tuning", append([]flagSpec{
 		{"jt", "tunnel-jobs", "N", "tunnel workers per attempt"},
 		{"n", "sample", "N", "addresses to sample per subnet"},
+		{"", "threshold", "PCT", "accept a junk set once this share of sampled endpoints works"},
 	}, netSpecs...)}
 
 	findJunkI1Group = flagGroup{"AmneziaWG init packet", []flagSpec{
@@ -180,6 +182,7 @@ func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
 	addI1GenFlags(fs, o)
 	intFlag(fs, &o.tunnelParallel, defaultTunnelJobs, "jt", "tunnel-jobs")
 	intFlag(fs, &o.perSubnet, findJunkSample, "n", "sample")
+	fs.IntVar(&o.junkThreshold, "threshold", defaultJunkThreshold, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	o.proto = protoAWG
 	o.pingCheck = true
