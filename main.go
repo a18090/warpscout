@@ -133,6 +133,10 @@ func runScanCmd(ctx context.Context, opts options) error {
 			writeConsoleBoth(os.Stdout, phases, out, opts.pingCheck)
 		}
 	}
+	if opts.conf != "" {
+		writeConfFile(opts, phases)
+	}
+
 	reportPath := opts.output
 	// A pipe consumer asked for one line, not a stray report file.
 	if reportPath == "" && opts.best {
@@ -167,16 +171,42 @@ func noEndpointMsg(opts options) string {
 	return "no working endpoints found"
 }
 
-func printBest(phases []phaseResult) {
-	var working []endpointResult
-	for _, ph := range phases {
-		working = append(working, workingSorted(ph.results)...)
+const noWorkingMsg = "every matching endpoint is flaky"
+
+func writeConfFile(opts options, phases []phaseResult) {
+	best, run, ok := bestOverall(phases)
+	if !ok {
+		fmt.Fprintln(os.Stderr, errPal.fail(noWorkingMsg))
+		return
 	}
-	if len(working) == 0 {
-		fmt.Fprintln(os.Stderr, errPal.fail("every matching endpoint is flaky"))
+	if err := writeConf(opts, best.endpoint, run.awg); err != nil {
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", opts.conf, err)))
+		return
+	}
+	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", run.name, best.endpoint, opts.conf)))
+}
+
+func bestOverall(phases []phaseResult) (endpointResult, protoRun, bool) {
+	var best endpointResult
+	var run protoRun
+	found := false
+	for _, ph := range phases {
+		for _, r := range workingSorted(ph.results) {
+			if !found || lessByLossRTT(r, best) {
+				best, run, found = r, ph.run, true
+			}
+		}
+	}
+	return best, run, found
+}
+
+func printBest(phases []phaseResult) {
+	best, _, ok := bestOverall(phases)
+	if !ok {
+		fmt.Fprintln(os.Stderr, errPal.fail(noWorkingMsg))
 		os.Exit(1)
 	}
-	fmt.Println(bestByPing(working).endpoint)
+	fmt.Println(best.endpoint)
 }
 
 func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, header, quitHint string) ([]phaseResult, error) {

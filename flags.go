@@ -19,6 +19,7 @@ type options struct {
 	junkThreshold  int
 	proto          string
 	output         string
+	conf           string
 	proxy          string
 	iface          string
 	accountPath    string
@@ -29,6 +30,7 @@ type options struct {
 	targets        []netip.Prefix
 	colos          []string
 	best           bool
+	tableOff       bool
 	i1Explicit     bool
 	pingCheck      bool
 	genJunk        bool
@@ -84,6 +86,8 @@ var (
 
 	outputGroup = flagGroup{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
+		{"", "conf", "FILE", "write a ready-to-import wg/awg config for the best endpoint"},
+		{"", "table-off", "", "add \"Table = off\" to the generated config: bring the interface up without touching routes"},
 		{"", "node", "COLO", "keep only endpoints landing on these colos: comma-separated IATA codes"},
 		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
@@ -161,6 +165,8 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	boolFlag(fs, &o.full, "f", "full")
 	fs.StringVar(&o.node, "node", "", "")
 	fs.BoolVar(&o.best, "best", false, "")
+	fs.StringVar(&o.conf, "conf", "", "")
+	fs.BoolVar(&o.tableOff, "table-off", false, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	fs.BoolVar(&o.noEmoji, "no-emoji", false, "")
 	o.wantTrace = true

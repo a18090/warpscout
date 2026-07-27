@@ -148,6 +148,52 @@ func TestBaseUAPI(t *testing.T) {
 	}
 }
 
+func TestRenderConf(t *testing.T) {
+	awg := renderConf(options{ipv6: true}, "188.114.98.5:2408", true)
+	for _, want := range []string{
+		"[Interface]",
+		"Address = " + warpAddressV6 + "/128",
+		"AllowedIPs = ::/0",
+		"PrivateKey = " + warpPrivateKey,
+		"Jc = 6", "Jmin = 10", "Jmax = 50",
+		"I1 = " + i1Default,
+		"[Peer]",
+		"PublicKey = " + warpPublicKey,
+		"Endpoint = 188.114.98.5:2408",
+		"PersistentKeepalive = 25",
+	} {
+		if !strings.Contains(awg, want) {
+			t.Errorf("AmneziaWG config missing %q:\n%s", want, awg)
+		}
+	}
+	if strings.Contains(awg, "Table") {
+		t.Errorf("Table must be absent without -table-off:\n%s", awg)
+	}
+	if strings.Contains(awg, "0.0.0.0") || strings.Contains(awg, warpAddress) {
+		t.Errorf("IPv6 config must not carry IPv4:\n%s", awg)
+	}
+
+	wg := renderConf(options{tableOff: true}, "188.114.98.5:2408", false)
+	for _, unwanted := range []string{"Jc = ", "Jmin = ", "Jmax = ", "I1 = ", "::"} {
+		if strings.Contains(wg, unwanted) {
+			t.Errorf("plain WireGuard config must not contain %q:\n%s", unwanted, wg)
+		}
+	}
+	if !strings.Contains(wg, "Table = off") {
+		t.Errorf("-table-off not reflected:\n%s", wg)
+	}
+}
+
+func TestRenderConfNoInitPacket(t *testing.T) {
+	orig := awgI1
+	defer func() { awgI1 = orig }()
+
+	awgI1 = ""
+	if conf := renderConf(options{}, "188.114.98.5:2408", true); strings.Contains(conf, "I1 = ") {
+		t.Errorf("init packet must be omitted when empty:\n%s", conf)
+	}
+}
+
 func TestBaseUAPINoInitPacket(t *testing.T) {
 	orig := awgI1
 	defer func() { awgI1 = orig }()

@@ -24,6 +24,8 @@ var (
 	warpAddress    = "172.16.0.2"
 )
 
+const warpAddressV6 = "2606:4700:110:8d87:b0ba:4148:5a61:4873"
+
 const (
 	tunnelMTU = 1280
 	keepalive = 25
