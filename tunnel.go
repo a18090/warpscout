@@ -163,6 +163,10 @@ const (
 	// run of dropped pings. Sporadic single drops are packet loss, not flaky, so we
 	// key off a run of consecutive tail failures rather than a loss percentage.
 	flakyTailFails = 3
+	// A burst of flakyTailFails echoes technically fits a tail run, but with no
+	// margin at all for a single stray drop:
+	// measured 13 of 70 dead wg peers reported as working at 3 echoes, none at 10.
+	minDurabilityPings = 5
 )
 
 // tunnelPing pushes ICMP echoes to 1.1.1.1 through the live tunnel - the only way

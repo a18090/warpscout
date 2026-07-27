@@ -15,6 +15,7 @@ type options struct {
 	tunnelParallel int
 	timeoutSec     int
 	perSubnet      int
+	pingCount      int
 	proto          string
 	output         string
 	proxy          string
@@ -61,6 +62,7 @@ var (
 	scanGroup = flagGroup{"Scan tuning", append([]flagSpec{
 		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
 		{"P", "ping", "", "measure in-tunnel RTT and packet loss and flag flaky (TSPU-torn-down) endpoints; off by default for speed"},
+		{"", "ping-count", "N", fmt.Sprintf("echoes per durability burst, %dms apart - a longer burst catches tunnels TSPU kills late (default %d, implies -ping)", pingInterval.Milliseconds(), durabilityPings)},
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 	}, netSpecs...)}
@@ -153,6 +155,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	strFlag(fs, &o.proto, protoWG, "p", "proto")
 	strFlag(fs, &o.output, "", "o", "output")
 	boolFlag(fs, &o.pingCheck, "P", "ping")
+	fs.IntVar(&o.pingCount, "ping-count", 0, "")
 	boolFlag(fs, &o.full, "f", "full")
 	fs.StringVar(&o.node, "node", "", "")
 	fs.BoolVar(&o.best, "best", false, "")
@@ -187,6 +190,22 @@ func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
 func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	if awgI1 == i1Keyword {
 		awgI1 = ""
+	}
+	// One invariant for everything downstream: pings is the burst length and
+	// pingCheck is "burst at all", so -ping-count alone turns ping mode on rather than
+	// silently measuring nothing.
+	o.pingCount = max(o.pingCount, 0)
+	if o.pingCount > 0 {
+		o.pingCheck = true
+	} else if o.pingCheck {
+		o.pingCount = durabilityPings
+	}
+	// Too short a burst hands back dead endpoints as working: measured 8 of 70
+	// "working" wg peers at -ping-count 2 (where a tail run does not even fit) and 13 at
+	// -ping-count 3, all of which -ping-count 10 proved dead.
+	if o.pingCount > 0 && o.pingCount < minDurabilityPings {
+		fmt.Fprintf(os.Stderr, "-ping-count must be at least %d: a shorter burst reports torn-down endpoints as working\n", minDurabilityPings)
+		os.Exit(2)
 	}
 	if o.genJunk {
 		if o.proto == protoWG {
@@ -358,7 +377,8 @@ func flagColumnWidth(groups []flagGroup) int {
 
 func defaultNote(st conStyles, fs *flag.FlagSet, long string) string {
 	f := fs.Lookup(long)
-	if f == nil || f.DefValue == "" || f.DefValue == "false" {
+	// A zero default always means "off/unset" here, and the help text says so.
+	if f == nil || f.DefValue == "" || f.DefValue == "false" || f.DefValue == "0" {
 		return ""
 	}
 	if len(f.DefValue) > 40 {

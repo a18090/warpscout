@@ -227,10 +227,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 	var phases []phaseResult
 	for _, run := range runs {
 		results := make([]endpointResult, len(ips))
-		pings := 0
-		if opts.pingCheck {
-			pings = durabilityPings
-		}
+		pings := opts.pingCount
 		label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
 		emit(barBeginMsg{label: label, total: len(ips)})
 		work := func(tn *tunnel, i int) {
