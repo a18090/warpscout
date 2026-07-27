@@ -52,35 +52,15 @@ func setupScan(opts options) ([]protoRun, []netip.Addr, error) {
 	return runs, expandPools(sample), nil
 }
 
-func ensureAccount(ctx context.Context, opts options, awg bool, ips []netip.Addr, timeout time.Duration) error {
-	if a, err := loadAccount(opts.accountPath); err == nil {
-		applyAccount(a)
-		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", opts.accountPath)))
-		fmt.Fprintln(os.Stderr)
-		return nil
-	}
-	a, err := registerAccount(ctx, opts, awg, ips, timeout)
+func loadScanAccount(path string) error {
+	a, err := loadAccount(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("no WARP account at %s: run \"warpscout register\" first", path)
 	}
 	applyAccount(a)
-	return nil
-}
-
-func registerAccount(ctx context.Context, opts options, awg bool, ips []netip.Addr, timeout time.Duration) (account, error) {
-	a, err := obtainAccount(ctx, opts, awg, ips, timeout)
-	if err != nil {
-		if opts.proxy == "" {
-			return account{}, fmt.Errorf("registration failed: %v\ncould not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>", err)
-		}
-		return account{}, fmt.Errorf("registration failed: %v", err)
-	}
-	if err := saveAccount(opts.accountPath, a); err != nil {
-		return account{}, fmt.Errorf("could not save account to %s: %v", opts.accountPath, err)
-	}
-	fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", opts.accountPath)))
+	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", path)))
 	fmt.Fprintln(os.Stderr)
-	return a, nil
+	return nil
 }
 
 func runRegisterCmd(ctx context.Context, opts options) error {
@@ -88,28 +68,39 @@ func runRegisterCmd(ctx context.Context, opts options) error {
 	if err != nil {
 		return err
 	}
-	_, err = registerAccount(ctx, opts, runs[0].awg, ips, time.Duration(opts.timeoutSec)*time.Second)
-	return err
+	timeout := time.Duration(opts.timeoutSec) * time.Second
+
+	a, err := obtainAccount(ctx, opts, runs[0].awg, ips, timeout)
+	if err != nil {
+		if opts.proxy == "" {
+			return fmt.Errorf("registration failed: %v\ncould not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>", err)
+		}
+		return fmt.Errorf("registration failed: %v", err)
+	}
+	if err := saveAccount(opts.accountPath, a); err != nil {
+		return fmt.Errorf("could not save account to %s: %v", opts.accountPath, err)
+	}
+	fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", opts.accountPath)))
+	return nil
 }
 
 func runFindJunkCmd(ctx context.Context, opts options) error {
-	runs, ips, err := setupScan(opts)
+	if err := loadScanAccount(opts.accountPath); err != nil {
+		return err
+	}
+	runs, _, err := setupScan(opts)
 	if err != nil {
 		return err
 	}
-	timeout := time.Duration(opts.timeoutSec) * time.Second
-	if err := ensureAccount(ctx, opts, runs[0].awg, ips, timeout); err != nil {
-		return err
-	}
-	return runFindJunk(ctx, opts, runs, timeout)
+	return runFindJunk(ctx, opts, runs, time.Duration(opts.timeoutSec)*time.Second)
 }
 
 func runScanCmd(ctx context.Context, opts options) error {
-	runs, ips, err := setupScan(opts)
-	if err != nil {
+	if err := loadScanAccount(opts.accountPath); err != nil {
 		return err
 	}
-	if err := ensureAccount(ctx, opts, runs[0].awg, ips, time.Duration(opts.timeoutSec)*time.Second); err != nil {
+	runs, ips, err := setupScan(opts)
+	if err != nil {
 		return err
 	}
 

@@ -27,6 +27,7 @@ var commands = []command{
 			"",
 			"Working endpoints are reported grouped per subnet.",
 			"Needs a WARP account: run \"warpscout register\" first.",
+			"Needs a WARP account: run \"warpscout register\" first.",
 		},
 		groups: []flagGroup{scanGroup, protoGroup, awgGroup, outputGroup},
 		setup:  setupScanFlags,
@@ -37,7 +38,7 @@ var commands = []command{
 		brief: "register a WARP account and save it",
 		intro: []string{
 			"Registers a fresh WARP account and writes it to the account file,",
-			"overwriting any existing one.",
+			"overwriting any existing one. Every other command needs it.",
 			"",
 			"Falls back to registering through a WARP tunnel when the Cloudflare API",
 			"is unreachable directly; -proxy skips that fallback.",
