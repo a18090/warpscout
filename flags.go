@@ -25,6 +25,7 @@ type options struct {
 	node           string
 	targets        []netip.Prefix
 	colos          []string
+	best           bool
 	i1Explicit     bool
 	pingCheck      bool
 	genJunk        bool
@@ -78,6 +79,7 @@ var flagGroups = []flagGroup{
 	{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
 		{"", "node", "COLO", "keep only endpoints landing on these colos: comma-separated IATA codes"},
+		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
 		{"", "no-emoji", "", "drop country flag emoji (for terminals that can't render them)"},
 	}},
@@ -114,6 +116,7 @@ func parseFlags() options {
 	boolFlag(&o.full, "f", "full")
 	flag.StringVar(&o.target, "target", "", "")
 	flag.StringVar(&o.node, "node", "", "")
+	flag.BoolVar(&o.best, "best", false, "")
 	flag.BoolVar(&o.plain, "plain", false, "")
 	flag.BoolVar(&o.noEmoji, "no-emoji", false, "")
 	flag.BoolVar(&o.genJunk, "gen-junk", false, "")
@@ -162,6 +165,10 @@ func applyTarget(o *options) {
 }
 
 func applyNode(o *options) {
+	if o.best && o.findJunk {
+		fmt.Fprintln(os.Stderr, "-best needs a full scan: drop -find-junk")
+		os.Exit(2)
+	}
 	if o.node == "" {
 		return
 	}

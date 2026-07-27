@@ -114,13 +114,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	out := lipgloss.NewRenderer(os.Stdout)
-	if len(phases) == 1 {
-		writeConsole(os.Stdout, phases[0], out, opts.pingCheck)
+	if opts.best {
+		printBest(phases)
 	} else {
-		writeConsoleBoth(os.Stdout, phases, out, opts.pingCheck)
+		out := lipgloss.NewRenderer(os.Stdout)
+		if len(phases) == 1 {
+			writeConsole(os.Stdout, phases[0], out, opts.pingCheck)
+		} else {
+			writeConsoleBoth(os.Stdout, phases, out, opts.pingCheck)
+		}
 	}
 	reportPath := opts.output
+	// A pipe consumer asked for one line, not a stray report file.
+	if reportPath == "" && opts.best {
+		return
+	}
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
 	}
@@ -147,6 +155,18 @@ func noEndpointMsg(opts options) string {
 		return "no endpoint landed on " + strings.Join(opts.colos, ", ")
 	}
 	return "no working endpoints found"
+}
+
+func printBest(phases []phaseResult) {
+	var working []endpointResult
+	for _, ph := range phases {
+		working = append(working, workingSorted(ph.results)...)
+	}
+	if len(working) == 0 {
+		fmt.Fprintln(os.Stderr, errPal.fail("every matching endpoint is flaky"))
+		os.Exit(1)
+	}
+	fmt.Println(bestByPing(working).endpoint)
 }
 
 func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, header, quitHint string) ([]phaseResult, error) {
