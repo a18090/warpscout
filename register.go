@@ -247,6 +247,8 @@ func tunnelClient(tnet *netstack.Net) (*http.Client, error) {
 	}, nil
 }
 
+const registerSample = 5
+
 const tunnelDiscoverySample = 64
 
 const tunnelDiscoveryBudget = 40 * time.Second

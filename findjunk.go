@@ -130,7 +130,7 @@ func i1NoteFor(i1, label string) string {
 }
 
 func junkCommand(c junkCandidate) string {
-	parts := []string{filepath.Base(os.Args[0]), "-proto", protoAWG,
+	parts := []string{filepath.Base(os.Args[0]), "scan", "-proto", protoAWG,
 		fmt.Sprintf("-jc %d", c.jc), fmt.Sprintf("-jmin %d", c.jmin), fmt.Sprintf("-jmax %d", c.jmax)}
 	if c.i1 == "" {
 		parts = append(parts, "-i1 none")

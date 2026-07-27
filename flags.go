@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"strings"
@@ -29,9 +30,8 @@ type options struct {
 	i1Explicit     bool
 	pingCheck      bool
 	genJunk        bool
-	findJunk       bool
+	wantTrace      bool
 	ipv6           bool
-	register       bool
 	full           bool
 	plain          bool
 	noEmoji        bool
@@ -49,88 +49,138 @@ type flagGroup struct {
 	specs []flagSpec
 }
 
-var flagGroups = []flagGroup{
-	{"Scan tuning", []flagSpec{
-		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
+var (
+	netSpecs = []flagSpec{
 		{"t", "timeout", "SEC", "per-request timeout"},
+		{"6", "ipv6", "", "use IPv6 endpoint pools instead of IPv4"},
+		{"", "target", "ADDR", "use these addresses instead of the built-in pools: comma-separated IPs or CIDRs"},
+		{"I", "interface", "NAME", "work through this interface (bind to device; Linux, may need CAP_NET_RAW)"},
+		{"a", "account", "FILE", "cached WARP account file"},
+	}
+
+	scanGroup = flagGroup{"Scan tuning", append([]flagSpec{
+		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
 		{"P", "ping", "", "measure in-tunnel RTT and packet loss and flag flaky (TSPU-torn-down) endpoints; off by default for speed"},
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
-		{"6", "ipv6", "", "scan IPv6 endpoint pools instead of IPv4"},
-		{"", "target", "ADDR", "scan these addresses instead of the built-in pools: comma-separated IPs or CIDRs"},
-		{"I", "interface", "NAME", "scan and register through this interface (bind to device; Linux, may need CAP_NET_RAW)"},
-	}},
-	{"Protocol & registration", []flagSpec{
+	}, netSpecs...)}
+
+	protoGroup = flagGroup{"Protocol", []flagSpec{
 		{"p", "proto", "wg|awg|both", "tunnel protocol: wg (WireGuard), awg (AmneziaWG), or both"},
-		{"x", "proxy", "URL", "http(s)/socks5 proxy for registration"},
-		{"r", "register", "", "register a fresh WARP account, save it and exit"},
-		{"a", "account", "FILE", "cached WARP account file"},
-	}},
-	{"AmneziaWG obfuscation parameters", []flagSpec{
+	}}
+
+	awgGroup = flagGroup{"AmneziaWG obfuscation parameters", []flagSpec{
 		{"", "gen-junk", "", "randomize junk params per run (overridden by -jc/-jmin/-jmax)"},
-		{"", "find-junk", "", "keep rescanning with fresh random junk params (and a fresh I1 when -gen-i1 is set) until a set unblocks every sampled endpoint, then print the command to reuse it (implies -ping, needs -proto awg)"},
 		{"", "gen-i1", "PROTO", "generate the init packet per run: quic, dns, sip, stun or random"},
 		{"", "i1-sni", "HOST", "host to mimic in the generated I1 (default: a random well-known host)"},
 		{"", "jc", "N", "junk packet count"},
 		{"", "jmin", "N", "min junk packet size"},
 		{"", "jmax", "N", "max junk packet size"},
 		{"", "i1", "PKT", "custom init packet, or \"none\" to send none (default: built-in iCloud probe)"},
-	}},
-	{"Output", []flagSpec{
+	}}
+
+	outputGroup = flagGroup{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
 		{"", "node", "COLO", "keep only endpoints landing on these colos: comma-separated IATA codes"},
 		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
 		{"", "no-emoji", "", "drop country flag emoji (for terminals that can't render them)"},
-	}},
+	}}
+
+	registerGroup = flagGroup{"Registration", append([]flagSpec{
+		{"x", "proxy", "URL", "http(s)/socks5 proxy for registration"},
+	}, netSpecs...)}
+
+	findJunkGroup = flagGroup{"Search tuning", append([]flagSpec{
+		{"jt", "tunnel-jobs", "N", "tunnel workers per attempt"},
+		{"n", "sample", "N", "addresses to sample per subnet"},
+	}, netSpecs...)}
+
+	findJunkI1Group = flagGroup{"AmneziaWG init packet", []flagSpec{
+		{"", "gen-i1", "PROTO", "generate the init packet per attempt: quic, dns, sip, stun or random"},
+		{"", "i1-sni", "HOST", "host to mimic in the generated I1 (default: a random well-known host)"},
+	}}
+
+	plainGroup = flagGroup{"Output", []flagSpec{
+		{"", "plain", "", "force plain line output (no live TUI)"},
+	}}
+)
+
+func intFlag(fs *flag.FlagSet, p *int, def int, short, long string) {
+	fs.IntVar(p, short, def, "")
+	fs.IntVar(p, long, def, "")
 }
 
-func intFlag(p *int, def int, short, long string) {
-	flag.IntVar(p, short, def, "")
-	flag.IntVar(p, long, def, "")
+func strFlag(fs *flag.FlagSet, p *string, def, short, long string) {
+	fs.StringVar(p, short, def, "")
+	fs.StringVar(p, long, def, "")
 }
 
-func strFlag(p *string, def, short, long string) {
-	flag.StringVar(p, short, def, "")
-	flag.StringVar(p, long, def, "")
+func boolFlag(fs *flag.FlagSet, p *bool, short, long string) {
+	fs.BoolVar(p, short, false, "")
+	fs.BoolVar(p, long, false, "")
 }
 
-func boolFlag(p *bool, short, long string) {
-	flag.BoolVar(p, short, false, "")
-	flag.BoolVar(p, long, false, "")
+func addNetFlags(fs *flag.FlagSet, o *options) {
+	intFlag(fs, &o.timeoutSec, 2, "t", "timeout")
+	boolFlag(fs, &o.ipv6, "6", "ipv6")
+	strFlag(fs, &o.iface, "", "I", "interface")
+	strFlag(fs, &o.accountPath, defaultAccount, "a", "account")
+	fs.StringVar(&o.target, "target", "", "")
 }
 
-func parseFlags() options {
-	var o options
-	intFlag(&o.tunnelParallel, 10, "jt", "tunnel-jobs")
-	intFlag(&o.timeoutSec, 2, "t", "timeout")
-	intFlag(&o.perSubnet, 5, "n", "sample")
-	strFlag(&o.proto, protoWG, "p", "proto")
-	strFlag(&o.output, "", "o", "output")
-	strFlag(&o.proxy, "", "x", "proxy")
-	strFlag(&o.iface, "", "I", "interface")
-	strFlag(&o.accountPath, defaultAccount, "a", "account")
-	boolFlag(&o.pingCheck, "P", "ping")
-	boolFlag(&o.ipv6, "6", "ipv6")
-	boolFlag(&o.register, "r", "register")
-	boolFlag(&o.full, "f", "full")
-	flag.StringVar(&o.target, "target", "", "")
-	flag.StringVar(&o.node, "node", "", "")
-	flag.BoolVar(&o.best, "best", false, "")
-	flag.BoolVar(&o.plain, "plain", false, "")
-	flag.BoolVar(&o.noEmoji, "no-emoji", false, "")
-	flag.BoolVar(&o.genJunk, "gen-junk", false, "")
-	flag.BoolVar(&o.findJunk, "find-junk", false, "")
-	flag.IntVar(&awgJc, "jc", awgJc, "")
-	flag.IntVar(&awgJmin, "jmin", awgJmin, "")
-	flag.IntVar(&awgJmax, "jmax", awgJmax, "")
-	flag.StringVar(&awgI1, "i1", awgI1, "")
-	flag.StringVar(&o.genI1, "gen-i1", "", "")
-	flag.StringVar(&o.i1Host, "i1-sni", "", "")
+func addAWGFlags(fs *flag.FlagSet, o *options) {
+	fs.BoolVar(&o.genJunk, "gen-junk", false, "")
+	fs.IntVar(&awgJc, "jc", awgJc, "")
+	fs.IntVar(&awgJmin, "jmin", awgJmin, "")
+	fs.IntVar(&awgJmax, "jmax", awgJmax, "")
+	fs.StringVar(&awgI1, "i1", awgI1, "")
+	addI1GenFlags(fs, o)
+}
 
-	flag.Usage = usage
-	flag.Parse()
+func addI1GenFlags(fs *flag.FlagSet, o *options) {
+	fs.StringVar(&o.genI1, "gen-i1", "", "")
+	fs.StringVar(&o.i1Host, "i1-sni", "", "")
+}
 
+func setupScanFlags(fs *flag.FlagSet, o *options) {
+	addNetFlags(fs, o)
+	addAWGFlags(fs, o)
+	intFlag(fs, &o.tunnelParallel, 10, "jt", "tunnel-jobs")
+	intFlag(fs, &o.perSubnet, 5, "n", "sample")
+	strFlag(fs, &o.proto, protoWG, "p", "proto")
+	strFlag(fs, &o.output, "", "o", "output")
+	boolFlag(fs, &o.pingCheck, "P", "ping")
+	boolFlag(fs, &o.full, "f", "full")
+	fs.StringVar(&o.node, "node", "", "")
+	fs.BoolVar(&o.best, "best", false, "")
+	fs.BoolVar(&o.plain, "plain", false, "")
+	fs.BoolVar(&o.noEmoji, "no-emoji", false, "")
+	o.wantTrace = true
+}
+
+func setupRegisterFlags(fs *flag.FlagSet, o *options) {
+	addNetFlags(fs, o)
+	addAWGFlags(fs, o)
+	strFlag(fs, &o.proto, protoWG, "p", "proto")
+	strFlag(fs, &o.proxy, "", "x", "proxy")
+	fs.BoolVar(&o.plain, "plain", false, "")
+	o.perSubnet = registerSample
+}
+
+func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
+	addNetFlags(fs, o)
+	addI1GenFlags(fs, o)
+	intFlag(fs, &o.tunnelParallel, 10, "jt", "tunnel-jobs")
+	intFlag(fs, &o.perSubnet, findJunkSample, "n", "sample")
+	fs.BoolVar(&o.plain, "plain", false, "")
+	o.proto = protoAWG
+	o.pingCheck = true
+}
+
+// Flags a command does not register stay at their zero value, so each step here
+// is a no-op for the commands it does not apply to.
+func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	if awgI1 == i1Keyword {
 		awgI1 = ""
 	}
@@ -139,16 +189,12 @@ func parseFlags() options {
 			fmt.Fprintln(os.Stderr, "-gen-junk needs AmneziaWG: use -proto awg or -proto both")
 			os.Exit(2)
 		}
-		applyGenJunk()
+		applyGenJunk(fs)
 	}
-	applyGenI1(&o)
-	if o.findJunk {
-		applyFindJunk(&o)
-	}
+	applyGenI1(fs, o)
 	validateJunkParams()
-	applyTarget(&o)
-	applyNode(&o)
-	return o
+	applyTarget(o)
+	applyNode(o)
 }
 
 func applyTarget(o *options) {
@@ -165,16 +211,8 @@ func applyTarget(o *options) {
 }
 
 func applyNode(o *options) {
-	if o.best && o.findJunk {
-		fmt.Fprintln(os.Stderr, "-best needs a full scan: drop -find-junk")
-		os.Exit(2)
-	}
 	if o.node == "" {
 		return
-	}
-	if o.findJunk {
-		fmt.Fprintln(os.Stderr, "-find-junk never resolves the exit colo: drop -node")
-		os.Exit(2)
 	}
 	for _, code := range strings.Split(o.node, ",") {
 		if code = strings.ToUpper(strings.TrimSpace(code)); code != "" {
@@ -187,27 +225,8 @@ func applyNode(o *options) {
 	}
 }
 
-func applyFindJunk(o *options) {
-	if o.proto != protoAWG {
-		fmt.Fprintln(os.Stderr, "-find-junk searches AmneziaWG junk params: use -proto awg")
-		os.Exit(2)
-	}
-	o.pingCheck = true
-
-	explicit := false
-	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "n" || f.Name == "sample" {
-			explicit = true
-		}
-	})
-	if !explicit {
-		o.perSubnet = findJunkSample
-	}
-}
-
-func applyGenI1(o *options) {
-	explicit := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+func applyGenI1(fs *flag.FlagSet, o *options) {
+	explicit := explicitFlags(fs)
 	o.i1Explicit = explicit["i1"] || o.genI1 != ""
 
 	if o.genI1 == "" {
@@ -231,9 +250,8 @@ func applyGenI1(o *options) {
 	}
 }
 
-func applyGenJunk() {
-	explicit := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+func applyGenJunk(fs *flag.FlagSet) {
+	explicit := explicitFlags(fs)
 
 	jc, jmin, jmax := awgJc, awgJmin, awgJmax
 	genJunkParams()
@@ -246,6 +264,12 @@ func applyGenJunk() {
 	if explicit["jmax"] {
 		awgJmax = jmax
 	}
+}
+
+func explicitFlags(fs *flag.FlagSet) map[string]bool {
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	return set
 }
 
 func validateJunkParams() {
@@ -264,32 +288,47 @@ func validateJunkParams() {
 	}
 }
 
-func usage() {
-	w := flag.CommandLine.Output()
+func rootUsage(w io.Writer) {
 	st := newConStyles(lipgloss.NewRenderer(w))
 
 	fmt.Fprintln(w, st.title.Render("warpscout")+" - find the exit colo and region of Cloudflare WARP endpoints")
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Two-phase scan:")
-	fmt.Fprintln(w, "  - Phase 1 finds which WARP ports get through this network")
-	fmt.Fprintln(w, "  - Phase 2 verifies each endpoint's real exit colo through a WARP tunnel")
+	fmt.Fprintln(w, st.title.Render("Usage:"))
+	fmt.Fprintf(w, "  %s <command> [options]\n", st.accent.Render("warpscout"))
+	fmt.Fprintf(w, "\n%s\n", st.title.Render("Commands"))
+
+	col := 0
+	for _, c := range commands {
+		if len(c.name) > col {
+			col = len(c.name)
+		}
+	}
+	for _, c := range commands {
+		fmt.Fprintf(w, "  %s%s%s\n", st.accent.Render(c.name), strings.Repeat(" ", col-len(c.name)+2), c.brief)
+	}
+	fmt.Fprintf(w, "\nRun %s for the options of a command.\n", st.accent.Render("warpscout <command> -h"))
+	fmt.Fprintln(w, "Start with "+st.accent.Render("warpscout register")+" - every other command needs a WARP account.")
+}
+
+func commandUsage(w io.Writer, cmd command, fs *flag.FlagSet) {
+	st := newConStyles(lipgloss.NewRenderer(w))
+
+	fmt.Fprintln(w, st.title.Render("warpscout "+cmd.name)+" - "+cmd.brief)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "Working endpoints are reported grouped per subnet")
+	for _, line := range cmd.intro {
+		fmt.Fprintln(w, line)
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, st.title.Render("Usage:"))
-	fmt.Fprintf(w, "  %s [options]\n", st.accent.Render("warpscout"))
+	fmt.Fprintf(w, "  %s [options]\n", st.accent.Render("warpscout "+cmd.name))
 
-	col := flagColumnWidth()
-	for _, g := range flagGroups {
+	col := flagColumnWidth(cmd.groups)
+	for _, g := range cmd.groups {
 		fmt.Fprintf(w, "\n%s\n", st.title.Render(g.title))
 		for _, s := range g.specs {
 			names := flagNames(s)
-			pad := col - len(names)
-			if pad < 0 {
-				pad = 0
-			}
 			fmt.Fprintf(w, "%s%s%s%s\n",
-				st.accent.Render(names), strings.Repeat(" ", pad+2), s.help, defaultNote(st, s.long))
+				st.accent.Render(names), strings.Repeat(" ", col-len(names)+2), s.help, defaultNote(st, fs, s.long))
 		}
 	}
 }
@@ -301,9 +340,9 @@ func flagNames(s flagSpec) string {
 	return fmt.Sprintf("  -%s, -%s %s", s.short, s.long, s.meta)
 }
 
-func flagColumnWidth() int {
+func flagColumnWidth(groups []flagGroup) int {
 	max := 0
-	for _, g := range flagGroups {
+	for _, g := range groups {
 		for _, s := range g.specs {
 			if n := len(flagNames(s)); n > max {
 				max = n
@@ -313,8 +352,8 @@ func flagColumnWidth() int {
 	return max
 }
 
-func defaultNote(st conStyles, long string) string {
-	f := flag.CommandLine.Lookup(long)
+func defaultNote(st conStyles, fs *flag.FlagSet, long string) string {
+	f := fs.Lookup(long)
 	if f == nil || f.DefValue == "" || f.DefValue == "false" {
 		return ""
 	}

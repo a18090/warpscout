@@ -13,29 +13,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-func main() {
-	opts := parseFlags()
-
-	errPal = palette{enabled: colorEnabled(os.Stderr)}
-	noEmoji = opts.noEmoji || usePlainOutput(opts)
-
+// setupScan resolves everything a command needs before touching the network:
+// protocol runs, the pool selection (-6/-target), the source interface and the
+// sampled addresses. register needs it too - its tunnel fallback registers
+// through one of these addresses.
+func setupScan(opts options) ([]protoRun, []netip.Addr, error) {
 	runs, err := parseProto(opts.proto)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-		os.Exit(1)
-	}
-	timeout := time.Duration(opts.timeoutSec) * time.Second
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	haveConfig := false
-	if !opts.register {
-		if a, err := loadAccount(opts.accountPath); err == nil {
-			applyAccount(a)
-			haveConfig = true
-			fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", opts.accountPath)))
-			fmt.Fprintln(os.Stderr)
-		}
+		return nil, nil, err
 	}
 
 	if opts.ipv6 {
@@ -48,57 +33,91 @@ func main() {
 	// precise error); the host-wide check only runs without it.
 	if opts.iface != "" {
 		if !deviceBindSupported {
-			fmt.Fprintln(os.Stderr, errPal.fail("-interface requires Linux (SO_BINDTODEVICE)"))
-			os.Exit(1)
+			return nil, nil, fmt.Errorf("-interface requires Linux (SO_BINDTODEVICE)")
 		}
 		ip, err := interfaceAddr(opts.iface, opts.ipv6)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-			os.Exit(1)
+			return nil, nil, err
 		}
 		scanInterface = opts.iface
 		scanSourceIP = ip
 	} else if !haveAddrFamily(opts.ipv6) {
-		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("no routable %s address on this host - nothing to scan", famName(opts.ipv6))))
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("no routable %s address on this host - nothing to scan", famName(opts.ipv6))
 	}
+
 	sample := opts.perSubnet
 	if opts.full {
 		sample = 0
 	}
-	ips := expandPools(sample)
+	return runs, expandPools(sample), nil
+}
 
-	if !haveConfig {
-		a, err := obtainAccount(ctx, opts, runs[0].awg, ips, timeout)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("registration failed: %v", err)))
-			if opts.proxy == "" {
-				fmt.Fprintln(os.Stderr, errPal.fail("could not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>"))
-			}
-			os.Exit(1)
-		}
-		if err := saveAccount(opts.accountPath, a); err != nil {
-			fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("warning: could not save account to %s: %v", opts.accountPath, err)))
-		}
+func ensureAccount(ctx context.Context, opts options, awg bool, ips []netip.Addr, timeout time.Duration) error {
+	if a, err := loadAccount(opts.accountPath); err == nil {
 		applyAccount(a)
-		fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", opts.accountPath)))
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", opts.accountPath)))
 		fmt.Fprintln(os.Stderr)
+		return nil
 	}
-
-	if opts.register {
-		return
+	a, err := registerAccount(ctx, opts, awg, ips, timeout)
+	if err != nil {
+		return err
 	}
+	applyAccount(a)
+	return nil
+}
 
-	if opts.findJunk {
-		if err := runFindJunk(ctx, opts, runs, timeout); err != nil {
-			fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-			os.Exit(1)
+func registerAccount(ctx context.Context, opts options, awg bool, ips []netip.Addr, timeout time.Duration) (account, error) {
+	a, err := obtainAccount(ctx, opts, awg, ips, timeout)
+	if err != nil {
+		if opts.proxy == "" {
+			return account{}, fmt.Errorf("registration failed: %v\ncould not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>", err)
 		}
-		return
+		return account{}, fmt.Errorf("registration failed: %v", err)
+	}
+	if err := saveAccount(opts.accountPath, a); err != nil {
+		return account{}, fmt.Errorf("could not save account to %s: %v", opts.accountPath, err)
+	}
+	fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", opts.accountPath)))
+	fmt.Fprintln(os.Stderr)
+	return a, nil
+}
+
+func runRegisterCmd(ctx context.Context, opts options) error {
+	runs, ips, err := setupScan(opts)
+	if err != nil {
+		return err
+	}
+	_, err = registerAccount(ctx, opts, runs[0].awg, ips, time.Duration(opts.timeoutSec)*time.Second)
+	return err
+}
+
+func runFindJunkCmd(ctx context.Context, opts options) error {
+	runs, ips, err := setupScan(opts)
+	if err != nil {
+		return err
+	}
+	timeout := time.Duration(opts.timeoutSec) * time.Second
+	if err := ensureAccount(ctx, opts, runs[0].awg, ips, timeout); err != nil {
+		return err
+	}
+	return runFindJunk(ctx, opts, runs, timeout)
+}
+
+func runScanCmd(ctx context.Context, opts options) error {
+	runs, ips, err := setupScan(opts)
+	if err != nil {
+		return err
+	}
+	if err := ensureAccount(ctx, opts, runs[0].awg, ips, time.Duration(opts.timeoutSec)*time.Second); err != nil {
+		return err
 	}
 
-	phases, scanErr := runScanUI(ctx, cancel, opts, runs, ips, timeout, "", "")
-	if scanErr != nil {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	phases, err := runScanUI(ctx, cancel, opts, runs, ips, time.Duration(opts.timeoutSec)*time.Second, "", "")
+	if err != nil {
+		// runScan already reported the failure through the emit seam.
 		os.Exit(1)
 	}
 
@@ -110,8 +129,7 @@ func main() {
 	// Nothing to report: say so on stderr and fail, instead of leaving a report
 	// file whose only content is "No working endpoints found".
 	if !anyEndpoint(phases) {
-		fmt.Fprintln(os.Stderr, errPal.fail(noEndpointMsg(opts)))
-		os.Exit(1)
+		return fmt.Errorf("%s", noEndpointMsg(opts))
 	}
 
 	if opts.best {
@@ -127,7 +145,7 @@ func main() {
 	reportPath := opts.output
 	// A pipe consumer asked for one line, not a stray report file.
 	if reportPath == "" && opts.best {
-		return
+		return nil
 	}
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
@@ -137,6 +155,7 @@ func main() {
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
 	}
+	return nil
 }
 
 func anyEndpoint(phases []phaseResult) bool {
@@ -215,8 +234,6 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 	}
 	warpPorts = open
 
-	wantTrace := !opts.findJunk
-
 	var phases []phaseResult
 	for _, run := range runs {
 		results := make([]endpointResult, len(ips))
@@ -238,7 +255,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 			defer emit(probedMsg{})
 			ip := ips[i]
 			r := endpointResult{ip: ip}
-			if t, endpoint, ok, rtt, loss, flaky := tn.trace(ctx, ip, timeout, pings, wantTrace); ok {
+			if t, endpoint, ok, rtt, loss, flaky := tn.trace(ctx, ip, timeout, pings, opts.wantTrace); ok {
 				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
 				if pings > 0 {
 					r.rtt, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
@@ -247,7 +264,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 					r.latency = hrtt
 				}
 				found := foundMsg{endpoint: endpoint, latency: r.ping(), loss: r.loss, measured: r.measured, flaky: !r.durable}
-				if wantTrace {
+				if opts.wantTrace {
 					found.exit, found.colo = exitRegion(t), exitColo(t)
 				}
 				emit(found)
@@ -262,7 +279,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 		phases = append(phases, phaseResult{run, results})
 	}
 
-	if wantTrace {
+	if opts.wantTrace {
 		const coloStep = "Resolving exit regions"
 		emit(stepMsg{label: coloStep})
 		coloISO = resolveColoISO(ctx, exitColosOf(phases))
