@@ -98,7 +98,7 @@ func TestTeardown(t *testing.T) {
 		{"all ok", []bool{true, true, true, true, true}, false},
 		{"sporadic single drop is loss, not flaky", []bool{true, false, true, true, true}, false},
 		{"two mid drops recover", []bool{true, false, false, true, true}, false},
-		{"tail teardown (TSPU)", []bool{true, true, true, false, false, false}, true},
+		{"tail teardown (DPI)", []bool{true, true, true, false, false, false}, true},
 		{"trips early, never recovers", []bool{true, false, false, false, false}, true},
 		{"short trailing run below threshold", []bool{true, true, true, true, false, false}, false},
 	}

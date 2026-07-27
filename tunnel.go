@@ -132,10 +132,10 @@ func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout tim
 }
 
 // durability runs a ping burst and, only if it looks torn down, confirms with a
-// second burst. A real TSPU teardown stays dead across both; transient loss does
+// second burst. A real DPI teardown stays dead across both; transient loss does
 // not. The trustworthy (second) burst's numbers are reported when the first was
 // just noise. Measurement runs right after the trace, so the burst reads the
-// tunnel's state after a real request has already given TSPU something to kill.
+// tunnel's state after a real request has already given DPI something to kill.
 func (t *tunnel) durability(count int, timeout time.Duration) (time.Duration, float32, bool) {
 	rtt, loss, torn := t.tunnelPing(count, timeout)
 	if !torn {
@@ -170,8 +170,8 @@ const (
 )
 
 // tunnelPing pushes ICMP echoes to 1.1.1.1 through the live tunnel - the only way
-// to catch a peer that handshakes but gets its data flow dropped by TSPU. Echoes
-// are spread over time (to give TSPU traffic to react to) but replies are matched
+// to catch a peer that handshakes but gets its data flow dropped by DPI. Echoes
+// are spread over time (to give DPI traffic to react to) but replies are matched
 // by sequence and collected in a shared window, so a reply merely delayed by a
 // contended netstack (many userspace tunnels running at once) still counts rather
 // than being scored as a loss. Returns average RTT, loss fraction (diagnostic),
