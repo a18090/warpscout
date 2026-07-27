@@ -104,7 +104,7 @@ func parseFlags() options {
 	var o options
 	intFlag(&o.tunnelParallel, 10, "jt", "tunnel-jobs")
 	intFlag(&o.timeoutSec, 2, "t", "timeout")
-	intFlag(&o.perSubnet, 10, "n", "sample")
+	intFlag(&o.perSubnet, 5, "n", "sample")
 	strFlag(&o.proto, protoWG, "p", "proto")
 	strFlag(&o.output, "", "o", "output")
 	strFlag(&o.proxy, "", "x", "proxy")
