@@ -162,9 +162,11 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 func setupRegisterFlags(fs *flag.FlagSet, o *options) {
 	addNetFlags(fs, o)
 	addAWGFlags(fs, o)
-	strFlag(fs, &o.proto, protoWG, "p", "proto")
 	strFlag(fs, &o.proxy, "", "x", "proxy")
 	fs.BoolVar(&o.plain, "plain", false, "")
+	// The tunnel fallback sweeps both protocols anyway; awg goes first because it
+	// is the one that survives DPI, which is why the fallback ran at all.
+	o.proto = protoAWG
 	o.perSubnet = registerSample
 }
 

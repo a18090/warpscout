@@ -64,13 +64,13 @@ func loadScanAccount(path string) error {
 }
 
 func runRegisterCmd(ctx context.Context, opts options) error {
-	runs, ips, err := setupScan(opts)
+	_, ips, err := setupScan(opts)
 	if err != nil {
 		return err
 	}
 	timeout := time.Duration(opts.timeoutSec) * time.Second
 
-	a, err := obtainAccount(ctx, opts, runs[0].awg, ips, timeout)
+	a, err := obtainAccount(ctx, opts, true, ips, timeout)
 	if err != nil {
 		if opts.proxy == "" {
 			return fmt.Errorf("registration failed: %v\ncould not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>", err)
