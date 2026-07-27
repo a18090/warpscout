@@ -296,6 +296,58 @@ func TestExpandPools(t *testing.T) {
 	}
 }
 
+func TestParseTargets(t *testing.T) {
+	ok := map[string][]string{
+		"188.114.98.5":                    {"188.114.98.5/32"},
+		" 188.114.98.0/28 , 8.6.112.0/24": {"188.114.98.0/28", "8.6.112.0/24"},
+		"2606:4700:d0::1":                 {"2606:4700:d0::1/128"},
+	}
+	for spec, want := range ok {
+		got, err := parseTargets(spec)
+		if err != nil {
+			t.Errorf("parseTargets(%q) failed: %v", spec, err)
+			continue
+		}
+		var have []string
+		for _, p := range got {
+			have = append(have, p.String())
+		}
+		if strings.Join(have, ",") != strings.Join(want, ",") {
+			t.Errorf("parseTargets(%q) = %v, want %v", spec, have, want)
+		}
+	}
+
+	for _, spec := range []string{"", "nonsense", "8.6.112.0/8", "188.114.98.5,2606:4700:d0::1"} {
+		if _, err := parseTargets(spec); err == nil {
+			t.Errorf("parseTargets(%q) should have failed", spec)
+		}
+	}
+}
+
+func TestExpandTargets(t *testing.T) {
+	defer func(saved []netip.Prefix) { pools = saved }(pools)
+
+	pools, _ = parseTargets("188.114.98.5,162.159.192.0/28")
+	ips := expandPools(10)
+	const want = 1 + 10 // the /28 is sampled down to -n
+	if len(ips) != want {
+		t.Fatalf("expandPools = %d IPs, want %d", len(ips), want)
+	}
+	if ips[0].String() != "188.114.98.5" {
+		t.Errorf("single-address target expanded to %v", ips[0])
+	}
+	for _, ip := range ips[1:] {
+		if !pools[1].Contains(ip) {
+			t.Errorf("%v not in %s", ip, pools[1])
+		}
+	}
+
+	pools, _ = parseTargets("2606:4700:d0::1")
+	if ips := expandPools(10); len(ips) != 1 || ips[0].String() != "2606:4700:d0::1" {
+		t.Errorf("single-address IPv6 target expanded to %v", ips)
+	}
+}
+
 func TestFlagEmoji(t *testing.T) {
 	cases := map[string]string{
 		"RU":  "\U0001F1F7\U0001F1FA",

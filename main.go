@@ -40,6 +40,9 @@ func main() {
 	if opts.ipv6 {
 		pools = poolsV6
 	}
+	if len(opts.targets) > 0 {
+		pools = opts.targets
+	}
 	// With -interface, interfaceAddr is the authoritative family check (per-interface,
 	// precise error); the host-wide check only runs without it.
 	if opts.iface != "" {

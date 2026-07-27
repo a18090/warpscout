@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/netip"
 	"os"
 	"strings"
 
@@ -20,6 +21,8 @@ type options struct {
 	accountPath    string
 	genI1          string
 	i1Host         string
+	target         string
+	targets        []netip.Prefix
 	i1Explicit     bool
 	pingCheck      bool
 	genJunk        bool
@@ -51,6 +54,7 @@ var flagGroups = []flagGroup{
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 		{"6", "ipv6", "", "scan IPv6 endpoint pools instead of IPv4"},
+		{"", "target", "ADDR", "scan these addresses instead of the built-in pools: comma-separated IPs or CIDRs"},
 		{"I", "interface", "NAME", "scan and register through this interface (bind to device; Linux, may need CAP_NET_RAW)"},
 	}},
 	{"Protocol & registration", []flagSpec{
@@ -105,6 +109,7 @@ func parseFlags() options {
 	boolFlag(&o.ipv6, "6", "ipv6")
 	boolFlag(&o.register, "r", "register")
 	boolFlag(&o.full, "f", "full")
+	flag.StringVar(&o.target, "target", "", "")
 	flag.BoolVar(&o.plain, "plain", false, "")
 	flag.BoolVar(&o.noEmoji, "no-emoji", false, "")
 	flag.BoolVar(&o.genJunk, "gen-junk", false, "")
@@ -134,7 +139,21 @@ func parseFlags() options {
 		applyFindJunk(&o)
 	}
 	validateJunkParams()
+	applyTarget(&o)
 	return o
+}
+
+func applyTarget(o *options) {
+	if o.target == "" {
+		return
+	}
+	targets, err := parseTargets(o.target)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	o.targets = targets
+	o.ipv6 = !targets[0].Addr().Is4()
 }
 
 func applyFindJunk(o *options) {
