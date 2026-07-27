@@ -147,6 +147,39 @@ func exitColosOf(phases []phaseResult) []string {
 	return colos
 }
 
+// poolsWithHits drops the subnets a filter left empty; an empty row is only
+// worth showing when the scan really covered the whole subnet.
+func poolsWithHits(phases []phaseResult) []netip.Prefix {
+	out := make([]netip.Prefix, 0, len(pools))
+	for _, p := range pools {
+		for _, ph := range phases {
+			if len(subnetEndpoints(ph.results, p)) > 0 {
+				out = append(out, p)
+				break
+			}
+		}
+	}
+	return out
+}
+
+func filterByColo(phases []phaseResult, colos []string) []phaseResult {
+	keep := make(map[string]struct{}, len(colos))
+	for _, c := range colos {
+		keep[c] = struct{}{}
+	}
+	out := make([]phaseResult, 0, len(phases))
+	for _, ph := range phases {
+		var kept []endpointResult
+		for _, r := range ph.results {
+			if _, ok := keep[strings.ToUpper(r.exit.colo)]; ok {
+				kept = append(kept, r)
+			}
+		}
+		out = append(out, phaseResult{ph.run, kept})
+	}
+	return out
+}
+
 func workingSorted(results []endpointResult) []endpointResult {
 	return filterSorted(results, endpointResult.working)
 }

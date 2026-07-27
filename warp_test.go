@@ -348,6 +348,25 @@ func TestExpandTargets(t *testing.T) {
 	}
 }
 
+func TestFilterByColo(t *testing.T) {
+	phases := []phaseResult{{run: protoRun{true, "awg"}, results: []endpointResult{
+		{endpoint: "1.1.1.1:2408", exit: traceResult{colo: "HEL"}},
+		{endpoint: "2.2.2.2:2408", exit: traceResult{colo: "FRA"}},
+		{endpoint: "3.3.3.3:2408"},
+	}}}
+
+	got := filterByColo(phases, []string{"HEL"})
+	if len(got) != 1 || len(got[0].results) != 1 {
+		t.Fatalf("filterByColo kept %v results, want 1", got)
+	}
+	if ep := got[0].results[0].endpoint; ep != "1.1.1.1:2408" {
+		t.Errorf("filterByColo kept %s, want the HEL endpoint", ep)
+	}
+	if got[0].run.name != "awg" {
+		t.Error("filterByColo dropped the proto run")
+	}
+}
+
 func TestFlagEmoji(t *testing.T) {
 	cases := map[string]string{
 		"RU":  "\U0001F1F7\U0001F1FA",

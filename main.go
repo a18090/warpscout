@@ -6,6 +6,7 @@ import (
 	"net/netip"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -101,6 +102,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	if len(opts.colos) > 0 {
+		phases = filterByColo(phases, opts.colos)
+		pools = poolsWithHits(phases)
+	}
+
+	// Nothing to report: say so on stderr and fail, instead of leaving a report
+	// file whose only content is "No working endpoints found".
+	if !anyEndpoint(phases) {
+		fmt.Fprintln(os.Stderr, errPal.fail(noEndpointMsg(opts)))
+		os.Exit(1)
+	}
+
 	out := lipgloss.NewRenderer(os.Stdout)
 	if len(phases) == 1 {
 		writeConsole(os.Stdout, phases[0], out, opts.pingCheck)
@@ -116,6 +129,24 @@ func main() {
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
 	}
+}
+
+func anyEndpoint(phases []phaseResult) bool {
+	for _, ph := range phases {
+		for _, r := range ph.results {
+			if r.ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func noEndpointMsg(opts options) string {
+	if len(opts.colos) > 0 {
+		return "no endpoint landed on " + strings.Join(opts.colos, ", ")
+	}
+	return "no working endpoints found"
 }
 
 func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, header, quitHint string) ([]phaseResult, error) {
