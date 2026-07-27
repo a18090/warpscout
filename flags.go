@@ -197,6 +197,16 @@ func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
 // Flags a command does not register stay at their zero value, so each step here
 // is a no-op for the commands it does not apply to.
 func applyCommonFlags(fs *flag.FlagSet, o *options) {
+	for _, f := range []struct{ name, value string }{{"conf", o.conf}, {"o", o.output}} {
+		if strings.HasPrefix(f.value, "-") {
+			fmt.Fprintf(os.Stderr, "-%s needs a file name, got %q\n", f.name, f.value)
+			os.Exit(2)
+		}
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "unexpected argument %q\n", fs.Arg(0))
+		os.Exit(2)
+	}
 	if awgI1 == i1Keyword {
 		awgI1 = ""
 	}
