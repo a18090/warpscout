@@ -1,6 +1,11 @@
 package main
 
-import "os"
+import (
+	"os"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+)
 
 const (
 	ansiReset  = "\033[0m"
@@ -24,6 +29,19 @@ func isTerminal(f *os.File) bool {
 
 func colorEnabled(f *os.File) bool {
 	return os.Getenv("NO_COLOR") == "" && isTerminal(f)
+}
+
+func colorForced() bool {
+	forced := os.Getenv("CLICOLOR_FORCE")
+	return os.Getenv("NO_COLOR") == "" && forced != "" && forced != "0"
+}
+
+func consoleRenderer(f *os.File) *lipgloss.Renderer {
+	r := lipgloss.NewRenderer(f)
+	if r.ColorProfile() == termenv.Ascii && colorForced() {
+		r.SetColorProfile(termenv.ANSI256)
+	}
+	return r
 }
 
 type palette struct {

@@ -9,7 +9,6 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
 // register needs this too - its tunnel fallback registers through one of the
@@ -131,7 +130,7 @@ func runScanCmd(ctx context.Context, opts options) error {
 	if opts.best {
 		printBest(phases)
 	} else {
-		out := lipgloss.NewRenderer(os.Stdout)
+		out := consoleRenderer(os.Stdout)
 		if len(phases) == 1 {
 			writeConsole(os.Stdout, phases[0], out, opts.pingCheck)
 		} else {
