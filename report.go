@@ -48,7 +48,7 @@ const (
 type endpointResult struct {
 	ip       netip.Addr
 	endpoint string
-	exit     traceResult
+	exit     metaResult
 	latency  time.Duration // host ICMP ping to the bare IP (off-tunnel)
 	rtt      time.Duration // in-tunnel RTT to 1.1.1.1, valid only when measured
 	loss     float32       // in-tunnel packet loss 0..1, valid only when measured
@@ -107,6 +107,8 @@ func latencyStr(d time.Duration) string {
 func (r endpointResult) working() bool { return r.ok && r.durable }
 func (r endpointResult) flaky() bool   { return r.ok && !r.durable }
 
+func noFlag(string) string { return "" }
+
 func withFlag(flag, code string) string {
 	if flag == "" {
 		return code
@@ -114,38 +116,21 @@ func withFlag(flag, code string) string {
 	return flag + " " + code
 }
 
-func exitRegion(t traceResult) string {
+func exitRegion(t metaResult) string {
 	if t.loc == "" {
 		return "?"
 	}
 	return withFlag(flagEmoji(t.loc), t.loc)
 }
 
-func exitColo(t traceResult) string {
+func exitColo(t metaResult) string {
 	if t.colo == "" {
 		return "?"
 	}
-	return withFlag(coloFlag(t.colo), t.colo)
+	return t.colo
 }
 
-func exitColosOf(phases []phaseResult) []string {
-	seen := make(map[string]struct{})
-	var colos []string
-	for _, ph := range phases {
-		for _, r := range ph.results {
-			c := r.exit.colo
-			if c == "" {
-				continue
-			}
-			if _, ok := seen[c]; ok {
-				continue
-			}
-			seen[c] = struct{}{}
-			colos = append(colos, c)
-		}
-	}
-	return colos
-}
+func exitColoLocation(t metaResult) string { return coloLocation(t) }
 
 // An empty row is only worth showing when the scan really covered the whole
 // subnet, so subnets a filter emptied are dropped.
@@ -238,8 +223,9 @@ func bestByPing(picks []endpointResult) endpointResult {
 func writeHeader(w io.Writer, working, probed int) {
 	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
 	fmt.Fprintf(w, "  WARP endpoints: %d working / %d probed\n", working, probed)
-	fmt.Fprintln(w, "  EXIT = exit region external services see through the tunnel")
-	fmt.Fprintln(w, "  COLO = Cloudflare WARP edge node the tunnel landed on")
+	fmt.Fprintln(w, "  SEEN AS = region external services see through the tunnel")
+	fmt.Fprintln(w, "  NODE / NODE LOCATION = Cloudflare WARP edge node the tunnel")
+	fmt.Fprintln(w, "                         landed on, and where it sits")
 	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
 }
 
@@ -263,10 +249,10 @@ func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 		}
 		fmt.Fprintf(w, "\n  ── %s ──  (%s)\n", p, sortNote(ping))
 		for _, r := range subnet {
-			fmt.Fprintf(w, "    %-22s %-8s %s%-10s %s\n", r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit))
+			fmt.Fprintf(w, "    %-22s %-8s %s%-10s %-6s %s\n", r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
 		}
 		for _, r := range subnetFlaky {
-			fmt.Fprintf(w, "    %-22s %-8s %s%-10s %-10s %s\n", r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), "flaky")
+			fmt.Fprintf(w, "    %-22s %-8s %s%-10s %-6s %-16s %s\n", r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit), "flaky")
 		}
 	}
 
@@ -301,8 +287,8 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Proto:    %s\n", st.accent.Render(strings.ToUpper(ph.run.name)))
 	writeJunkNote(w, st, ph.run.awg)
-	fmt.Fprintf(w, "Colo:     %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, coloFlag)))
-	fmt.Fprintf(w, "Regions:  %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
+	fmt.Fprintf(w, "Nodes:    %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, noFlag)))
+	fmt.Fprintf(w, "Seen as:  %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
 	fmt.Fprintf(w, "Working:  %s\n", st.ok.Render(strconv.Itoa(len(working)))+st.dim.Render(" / ")+strconv.Itoa(len(results))+" probed")
 	writeFlakyNote(w, st, len(flaky))
 	writePicksTable(w, st, working, flaky, ping)
@@ -364,14 +350,14 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult,
 		if picks := subnetEndpoints(working, p); len(picks) > 0 {
 			r := bestByPing(picks)
 			cells := append([]string{subnet, r.endpoint, r.pingStr()}, lossCell(r, ping)...)
-			cells = append(cells, exitRegion(r.exit), exitColo(r.exit))
+			cells = append(cells, exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
 			rows = append(rows, pickRow{cells, statusOK, r.loss, r.ping()})
 			continue
 		}
 		if picks := subnetEndpoints(flaky, p); len(picks) > 0 {
 			r := bestByPing(picks)
 			cells := append([]string{subnet, r.endpoint, r.pingStr()}, lossCell(r, ping)...)
-			cells = append(cells, "flaky", "")
+			cells = append(cells, "flaky", "", "")
 			rows = append(rows, pickRow{cells, statusFlaky, r.loss, r.ping()})
 			continue
 		}
@@ -379,7 +365,7 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult,
 		if ping {
 			cells = append(cells, "")
 		}
-		cells = append(cells, "", "")
+		cells = append(cells, "", "", "")
 		rows = append(rows, pickRow{cells, statusNone, 0, 0})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -387,7 +373,7 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult,
 	})
 
 	headers := append([]string{"SUBNET", "ENDPOINT", "PING"}, lossHeader(ping)...)
-	headers = append(headers, "EXIT", "COLO")
+	headers = append(headers, "SEEN AS", "NODE", "NODE LOCATION")
 	accentCols := metricCols(ping, 2)
 
 	fmt.Fprintln(w, "\n"+st.title.Render("Best endpoint per subnet ("+bestNote(ping)+")"))
@@ -469,20 +455,20 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer, p
 		wgTxt, wgStat := protoStatus(wgWork, wgFlaky, p)
 		awgTxt, awgStat := protoStatus(awgWork, awgFlaky, p)
 		r, found, isFlaky := bestPick(p, wgWork, awgWork, wgFlaky, awgFlaky)
-		endpoint, pingStr, region, colo := r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit)
+		endpoint, pingStr, region, colo, coloReg := r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit)
 		loss := lossCell(r, ping)
 		pick := statusOK
 		if isFlaky {
 			pick = statusFlaky
 		}
 		if !found {
-			endpoint, pingStr, region, colo, pick = "-", "", "", "", statusNone
+			endpoint, pingStr, region, colo, coloReg, pick = "-", "", "", "", "", statusNone
 			if ping {
 				loss = []string{""}
 			}
 		}
 		cells := append([]string{p.String(), wgTxt, awgTxt, endpoint, pingStr}, loss...)
-		cells = append(cells, region, colo)
+		cells = append(cells, region, colo, coloReg)
 		rows = append(rows, bothRow{cells, wgStat, awgStat, pick, r.loss, r.ping()})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -500,7 +486,7 @@ func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer, p
 	}
 
 	headers := append([]string{"SUBNET", "WG", "AWG", "ENDPOINT", "PING"}, lossHeader(ping)...)
-	headers = append(headers, "EXIT", "COLO")
+	headers = append(headers, "SEEN AS", "NODE", "NODE LOCATION")
 	accentCols := metricCols(ping, 4)
 
 	fmt.Fprintln(w, st.title.Render("WireGuard vs AmneziaWG per subnet"))
@@ -581,7 +567,7 @@ func writeSubnetPicks(w io.Writer, working []endpointResult, ping bool) {
 			continue
 		}
 		r := bestByPing(picks)
-		lines = append(lines, line{fmt.Sprintf("  %-18s %-22s %-8s %s%-10s %s", subnet, r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit)), r.loss, r.ping()})
+		lines = append(lines, line{fmt.Sprintf("  %-18s %-22s %-8s %s%-10s %-6s %s", subnet, r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit)), r.loss, r.ping()})
 	}
 	sort.SliceStable(lines, func(i, j int) bool {
 		return lessLossDur(lines[i].loss, lines[i].latency, lines[j].loss, lines[j].latency)

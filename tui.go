@@ -221,7 +221,7 @@ func (m scanModel) renderFeed() string {
 		lossHead = pad("LOSS", 6) + " "
 	}
 	var b strings.Builder
-	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" "+lossHead+pad("EXIT", 10)+" COLO") + "\n")
+	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" "+lossHead+pad("SEEN AS", 10)+" NODE") + "\n")
 	for _, r := range rows {
 		ep := pad(r.endpoint, 22)
 		ping := pad(latencyStr(r.latency), 8)

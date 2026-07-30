@@ -18,7 +18,7 @@ func TestWriteConsolePalette(t *testing.T) {
 		run: protoRun{false, "wg"},
 		results: []endpointResult{{
 			ip:       netip.MustParseAddr("8.47.69.86"),
-			exit:     traceResult{loc: "RU", colo: "DME"},
+			exit:     metaResult{loc: "RU", colo: "DME"},
 			endpoint: "8.47.69.86:2408",
 			ok:       true,
 			durable:  true,
@@ -396,8 +396,8 @@ func TestExpandTargets(t *testing.T) {
 
 func TestFilterByColo(t *testing.T) {
 	phases := []phaseResult{{run: protoRun{true, "awg"}, results: []endpointResult{
-		{endpoint: "1.1.1.1:2408", exit: traceResult{colo: "HEL"}},
-		{endpoint: "2.2.2.2:2408", exit: traceResult{colo: "FRA"}},
+		{endpoint: "1.1.1.1:2408", exit: metaResult{colo: "HEL"}},
+		{endpoint: "2.2.2.2:2408", exit: metaResult{colo: "FRA"}},
 		{endpoint: "3.3.3.3:2408"},
 	}}}
 
@@ -431,11 +431,15 @@ func TestFlagEmoji(t *testing.T) {
 	}
 }
 
-func TestParseTrace(t *testing.T) {
-	body := "fl=123\nip=1.2.3.4\ncolo=FRA\nloc=DE\nwarp=on\n"
-	got := parseTrace(body)
-	if got.colo != "FRA" || got.loc != "DE" || got.warp != "on" {
-		t.Errorf("parseTrace = %+v", got)
+func TestParseMeta(t *testing.T) {
+	body := `{"clientIp":"1.2.3.4","country":"RU","city":"Moscow",
+		"colo":{"iata":"ARN","cca2":"SE","city":"Stockholm"}}`
+	got := parseMeta(body)
+	if got.loc != "RU" || got.colo != "ARN" || got.coloCity != "Stockholm" || got.coloISO != "SE" {
+		t.Errorf("parseMeta = %+v", got)
+	}
+	if got := parseMeta("not json"); got != (metaResult{}) {
+		t.Errorf("parseMeta(garbage) = %+v, want zero", got)
 	}
 }
 

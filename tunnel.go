@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/amnezia-vpn/amneziawg-go/conn"
@@ -15,8 +16,6 @@ import (
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
-
-const cloudflareIP = "1.1.1.1:443"
 
 // The gvisor stack behind netstack.CreateNetTUN is never freed by the library
 // (netTun.Close only RemoveNIC), so one tunnel per IP leaks and OOMs. Tunnels
@@ -35,7 +34,7 @@ func newTunnel(awg bool) (*tunnel, error) {
 	}
 
 	localAddr := netip.MustParseAddr(warpAddress)
-	tunDev, tnet, err := netstack.CreateNetTUN([]netip.Addr{localAddr}, nil, tunnelMTU)
+	tunDev, tnet, err := netstack.CreateNetTUN([]netip.Addr{localAddr}, []netip.Addr{netip.MustParseAddr(pingTarget)}, tunnelMTU)
 	if err != nil {
 		return nil, err
 	}
@@ -57,7 +56,7 @@ func newTunnel(awg bool) (*tunnel, error) {
 	transport := &http.Transport{
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return tnet.DialContext(ctx, "tcp", cloudflareIP)
+			return tnet.DialContext(ctx, "tcp", metaAddr)
 		},
 	}
 	return &tunnel{dev: dev, tnet: tnet, client: &http.Client{Transport: transport}}, nil
@@ -65,14 +64,14 @@ func newTunnel(awg bool) (*tunnel, error) {
 
 func (t *tunnel) Close() { t.dev.Close() }
 
-func (t *tunnel) trace(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int, wantTrace bool) (tr traceResult, endpoint string, ok bool, rtt time.Duration, loss float32, flaky bool) {
+func (t *tunnel) probe(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, endpoint string, ok bool, rtt time.Duration, loss float32, flaky bool) {
 	for _, port := range warpPorts {
 		endpoint = net.JoinHostPort(ip.String(), strconv.Itoa(port))
-		if tr, rtt, loss, flaky, ok = t.traceEndpoint(ctx, endpoint, timeout, pings, wantTrace); ok {
+		if tr, rtt, loss, flaky, ok = t.probeEndpoint(ctx, endpoint, timeout, pings, wantMeta); ok {
 			return tr, endpoint, true, rtt, loss, flaky
 		}
 	}
-	return traceResult{}, endpoint, false, 0, 0, false
+	return metaResult{}, endpoint, false, 0, 0, false
 }
 
 func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Duration) bool {
@@ -95,45 +94,45 @@ func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Du
 	return waitHandshake(ctx, t.dev, timeout)
 }
 
-func (t *tunnel) traceEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int, wantTrace bool) (tr traceResult, rtt time.Duration, loss float32, flaky, ok bool) {
+func (t *tunnel) probeEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, rtt time.Duration, loss float32, flaky, ok bool) {
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
-		return traceResult{}, 0, 0, false, false
+		return metaResult{}, 0, 0, false, false
 	}
 	if err := t.dev.IpcSet(peer); err != nil {
-		return traceResult{}, 0, 0, false, false
+		return metaResult{}, 0, 0, false, false
 	}
 
 	// Wait for the handshake before sending traffic, otherwise the first TCP SYN
 	// is dropped by the not-yet-established peer and netstack stalls past timeout.
 	if !waitHandshake(ctx, t.dev, timeout) {
-		return traceResult{}, 0, 0, false, false
+		return metaResult{}, 0, 0, false, false
 	}
 
 	// find-junk only asks whether the peer comes up, and the durability ping
-	// already proves the tunnel passes data - the trace fetch adds nothing.
-	if !wantTrace {
+	// already proves the tunnel passes data - the meta fetch adds nothing.
+	if !wantMeta {
 		if pings <= 0 {
-			return traceResult{}, 0, 0, false, true
+			return metaResult{}, 0, 0, false, true
 		}
 		rtt, loss, flaky = t.durability(pings, timeout)
-		return traceResult{}, rtt, loss, flaky, true
+		return metaResult{}, rtt, loss, flaky, true
 	}
 
 	body, ok := t.fetch(ctx, timeout)
 	if !ok {
-		return traceResult{}, 0, 0, false, false
+		return metaResult{}, 0, 0, false, false
 	}
 	if pings <= 0 {
-		return parseTrace(body), 0, 0, false, true
+		return parseMeta(body), 0, 0, false, true
 	}
 	rtt, loss, flaky = t.durability(pings, timeout)
-	return parseTrace(body), rtt, loss, flaky, true
+	return parseMeta(body), rtt, loss, flaky, true
 }
 
 // A real DPI teardown stays dead across both bursts; transient loss does not,
 // so the second burst's numbers are the ones reported when the first was noise.
-// Running right after the trace lets the burst read the tunnel's state once a
+// Running right after the meta fetch lets the burst read the tunnel's state once a
 // real request has already given DPI something to kill.
 func (t *tunnel) durability(count int, timeout time.Duration) (time.Duration, float32, bool) {
 	rtt, loss, torn := t.tunnelPing(count, timeout)
@@ -150,8 +149,33 @@ func (t *tunnel) durability(count int, timeout time.Duration) (time.Duration, fl
 func (t *tunnel) fetch(ctx context.Context, timeout time.Duration) (string, bool) {
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	if !resolveMetaAddr(reqCtx, t.tnet) {
+		return "", false
+	}
 	t.client.Timeout = timeout
-	return fetchTrace(reqCtx, t.client, traceURL)
+	return fetchMeta(reqCtx, t.client, metaURL)
+}
+
+var (
+	metaAddrMu sync.Mutex
+	metaAddr   string
+)
+
+// Resolved through the tunnel, not on the host: a host resolver can answer with
+// an address that only routes outside the tunnel. The first worker to get
+// through fills it in for the rest of the run.
+func resolveMetaAddr(ctx context.Context, tnet *netstack.Net) bool {
+	metaAddrMu.Lock()
+	defer metaAddrMu.Unlock()
+	if metaAddr != "" {
+		return true
+	}
+	ips, err := tnet.LookupContextHost(ctx, metaHost)
+	if err != nil || len(ips) == 0 {
+		return false
+	}
+	metaAddr = net.JoinHostPort(ips[0], "443")
+	return true
 }
 
 const (

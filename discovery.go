@@ -16,13 +16,19 @@ import (
 	"golang.org/x/net/ipv6"
 )
 
-const traceURL = "https://cloudflare.com/cdn-cgi/trace"
+const (
+	metaHost = "speed.cloudflare.com"
+	metaURL  = "https://" + metaHost + "/meta"
+	// Without a Referer the endpoint answers 403.
+	metaReferer = "https://" + metaHost
+)
 
-func fetchTrace(ctx context.Context, client *http.Client, url string) (string, bool) {
+func fetchMeta(ctx context.Context, client *http.Client, url string) (string, bool) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", false
 	}
+	req.Header.Set("Referer", metaReferer)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", false

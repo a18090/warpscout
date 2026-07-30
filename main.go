@@ -265,7 +265,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 			defer emit(probedMsg{})
 			ip := ips[i]
 			r := endpointResult{ip: ip}
-			if t, endpoint, ok, rtt, loss, flaky := tn.trace(ctx, ip, timeout, pings, opts.wantTrace); ok {
+			if t, endpoint, ok, rtt, loss, flaky := tn.probe(ctx, ip, timeout, pings, opts.wantMeta); ok {
 				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
 				if pings > 0 {
 					r.rtt, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
@@ -274,7 +274,7 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 					r.latency = hrtt
 				}
 				found := foundMsg{endpoint: endpoint, latency: r.ping(), loss: r.loss, measured: r.measured, flaky: !r.durable}
-				if opts.wantTrace {
+				if opts.wantMeta {
 					found.exit, found.colo = exitRegion(t), exitColo(t)
 				}
 				emit(found)
@@ -287,13 +287,6 @@ func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Add
 		}
 		emit(barEndMsg{label: label, summary: "done"})
 		phases = append(phases, phaseResult{run, results})
-	}
-
-	if opts.wantTrace {
-		const coloStep = "Resolving exit regions"
-		emit(stepMsg{label: coloStep})
-		coloISO = resolveColoISO(ctx, exitColosOf(phases))
-		emit(stepMsg{label: coloStep, done: true, summary: "done"})
 	}
 
 	emit(doneMsg{})

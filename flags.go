@@ -34,7 +34,7 @@ type options struct {
 	i1Explicit     bool
 	pingCheck      bool
 	genJunk        bool
-	wantTrace      bool
+	wantMeta       bool
 	ipv6           bool
 	full           bool
 	plain          bool
@@ -169,7 +169,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.BoolVar(&o.tableOff, "table-off", false, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	fs.BoolVar(&o.emoji, "emoji", false, "")
-	o.wantTrace = true
+	o.wantMeta = true
 }
 
 func setupRegisterFlags(fs *flag.FlagSet, o *options) {
