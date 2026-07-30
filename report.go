@@ -73,12 +73,14 @@ func (r endpointResult) lossStr() string {
 	return fmt.Sprintf("%.0f%%", r.loss*100)
 }
 
-func lossField(r endpointResult, ping bool) string {
+func lossCol(v string, ping bool) string {
 	if !ping {
 		return ""
 	}
-	return fmt.Sprintf("%-6s ", r.lossStr())
+	return fmt.Sprintf("%-6s ", v)
 }
+
+func lossField(r endpointResult, ping bool) string { return lossCol(r.lossStr(), ping) }
 
 func sortNote(ping bool) string {
 	if ping {
@@ -243,44 +245,45 @@ func bestByPing(picks []endpointResult) endpointResult {
 	return best
 }
 
-func writeHeader(w io.Writer, working, probed int) {
-	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
-	fmt.Fprintf(w, "  WARP endpoints: %d working / %d probed\n", working, probed)
-	fmt.Fprintln(w, "  SEEN AS = region external services see through the tunnel")
-	fmt.Fprintln(w, "  NODE / NODE LOCATION = Cloudflare WARP edge node the tunnel")
-	fmt.Fprintln(w, "                         landed on, and where it sits")
-	fmt.Fprintln(w, "════════════════════════════════════════════════════════")
+const (
+	reportRowFmt   = "%-22s %-8s %s%-10s %-6s %s\n"
+	nodePickRowFmt = "%-6s %-22s %-8s %s%-10s %s\n"
+)
+
+func writeHeader(w io.Writer, working, probed int, ping bool) {
+	fmt.Fprintf(w, "# WARP endpoints: %d working / %d probed\n", working, probed)
+	fmt.Fprintf(w, "# %s\n", sortNote(ping))
+	fmt.Fprintln(w, "# SEEN AS = region external services see through the tunnel")
+	fmt.Fprintln(w, "# NODE / NODE LOCATION = Cloudflare WARP edge node the tunnel landed on, and where it sits")
+	fmt.Fprintln(w, "# One /24 pool can land on several different nodes - NODE is per endpoint, not per subnet")
 }
 
 func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 	working := workingSorted(results)
 	flaky := flakySorted(results)
-	writeHeader(w, len(working), len(results))
-	if len(flaky) > 0 {
-		fmt.Fprintf(w, "  %d flaky (handshake ok, dropped on re-probe)\n", len(flaky))
-	}
+	writeHeader(w, len(working), len(results), ping)
 	if len(working) == 0 && len(flaky) == 0 {
 		fmt.Fprintln(w, "\nNo working endpoints found.")
 		return
 	}
 
-	for _, p := range pools {
-		subnet := subnetEndpoints(working, p)
-		subnetFlaky := subnetEndpoints(flaky, p)
-		if len(subnet) == 0 && len(subnetFlaky) == 0 {
-			continue
-		}
-		fmt.Fprintf(w, "\n  ── %s ──  (%s)\n", p, sortNote(ping))
-		for _, r := range subnet {
-			fmt.Fprintf(w, "    %-22s %-8s %s%-10s %-6s %s\n", r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
-		}
-		for _, r := range subnetFlaky {
-			fmt.Fprintf(w, "    %-22s %-8s %s%-10s %-6s %-16s %s\n", r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit), "flaky")
-		}
-	}
-
 	if len(working) > 0 {
-		writeSubnetPicks(w, working, ping)
+		fmt.Fprintln(w)
+		writeRows(w, working, ping)
+	}
+	if len(flaky) > 0 {
+		fmt.Fprintf(w, "\n# %d flaky (handshake ok, dropped on re-probe)\n", len(flaky))
+		writeRows(w, flaky, ping)
+	}
+	if len(working) > 0 {
+		writeNodePicks(w, working, ping)
+	}
+}
+
+func writeRows(w io.Writer, results []endpointResult, ping bool) {
+	fmt.Fprintf(w, reportRowFmt, "ENDPOINT", "PING", lossCol("LOSS", ping), "SEEN AS", "NODE", "NODE LOCATION")
+	for _, r := range results {
+		fmt.Fprintf(w, reportRowFmt, r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
 	}
 }
 
@@ -575,30 +578,24 @@ func uniqueSorted(working []endpointResult, key func(endpointResult) string, fla
 	return strings.Join(vals, "  ")
 }
 
-func writeSubnetPicks(w io.Writer, working []endpointResult, ping bool) {
-	type line struct {
-		text    string
-		loss    float32
-		latency time.Duration
+// Grouped by node, not by subnet: a single /24 can hand out several different
+// edge nodes, so a per-subnet pick would hide all but one of them.
+func writeNodePicks(w io.Writer, working []endpointResult, ping bool) {
+	byNode := make(map[string][]endpointResult)
+	for _, r := range working {
+		node := exitColo(r.exit)
+		byNode[node] = append(byNode[node], r)
 	}
-	var lines []line
-	for _, p := range pools {
-		picks := subnetEndpoints(working, p)
-		subnet := p.String()
-		if len(picks) == 0 {
-			lines = append(lines, line{fmt.Sprintf("  %-18s %s", subnet, "no working endpoints"), 0, 0})
-			continue
-		}
-		r := bestByPing(picks)
-		lines = append(lines, line{fmt.Sprintf("  %-18s %-22s %-8s %s%-10s %-6s %s", subnet, r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit)), r.loss, r.ping()})
+	picks := make([]endpointResult, 0, len(byNode))
+	for _, group := range byNode {
+		picks = append(picks, bestByPing(group))
 	}
-	sort.SliceStable(lines, func(i, j int) bool {
-		return lessLossDur(lines[i].loss, lines[i].latency, lines[j].loss, lines[j].latency)
-	})
+	sort.Slice(picks, func(i, j int) bool { return lessByLossRTT(picks[i], picks[j]) })
 
-	fmt.Fprintf(w, "\n  ── Best working endpoint per subnet (%s) ──\n", bestNote(ping))
-	for _, l := range lines {
-		fmt.Fprintln(w, l.text)
+	fmt.Fprintf(w, "\n# Best endpoint per node (%s)\n", bestNote(ping))
+	fmt.Fprintf(w, nodePickRowFmt, "NODE", "ENDPOINT", "PING", lossCol("LOSS", ping), "SEEN AS", "NODE LOCATION")
+	for _, r := range picks {
+		fmt.Fprintf(w, nodePickRowFmt, exitColo(r.exit), r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColoLocation(r.exit))
 	}
 }
 

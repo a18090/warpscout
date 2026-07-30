@@ -45,6 +45,50 @@ func TestWriteConsolePalette(t *testing.T) {
 	}
 }
 
+func TestWriteFullReport(t *testing.T) {
+	mk := func(ip, colo, city string, ms int) endpointResult {
+		return endpointResult{
+			ip:       netip.MustParseAddr(ip),
+			endpoint: ip + ":2408",
+			exit:     metaResult{loc: "RU", colo: colo, coloCity: city, coloISO: "RU"},
+			latency:  time.Duration(ms) * time.Millisecond,
+			ok:       true,
+			durable:  true,
+		}
+	}
+	// Two addresses of the same /24 landing on different nodes - the case the
+	// old per-subnet summary collapsed to a single row.
+	results := []endpointResult{
+		mk("188.114.96.28", "ARN", "Stockholm", 63),
+		mk("188.114.96.99", "DME", "Moscow", 41),
+		mk("162.159.195.192", "KJA", "Krasnoyarsk", 22),
+	}
+
+	var buf bytes.Buffer
+	writeFullReport(&buf, results, false)
+	out := buf.String()
+
+	if strings.Contains(out, "═") || strings.Contains(out, "──") {
+		t.Error("report must not contain box drawing characters")
+	}
+	order := []string{"162.159.195.192:2408", "188.114.96.99:2408", "188.114.96.28:2408"}
+	for i := 1; i < len(order); i++ {
+		if strings.Index(out, order[i-1]) > strings.Index(out, order[i]) {
+			t.Errorf("endpoints not sorted by ping: %s came after %s", order[i-1], order[i])
+		}
+	}
+
+	_, picks, ok := strings.Cut(out, "# Best endpoint per node")
+	if !ok {
+		t.Fatal("report missing the per-node summary")
+	}
+	for _, node := range []string{"ARN", "DME", "KJA"} {
+		if !strings.Contains(picks, node) {
+			t.Errorf("per-node summary missing node %s", node)
+		}
+	}
+}
+
 func TestLessByLossRTT(t *testing.T) {
 	mk := func(ep string, ms int, loss float32, measured bool) endpointResult {
 		return endpointResult{endpoint: ep, rtt: time.Duration(ms) * time.Millisecond, loss: loss, measured: measured}
