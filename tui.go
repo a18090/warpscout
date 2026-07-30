@@ -183,8 +183,6 @@ func (m scanModel) View() string {
 	var b strings.Builder
 	if m.header != "" {
 		b.WriteString(st.title.Render(m.header) + "\n\n")
-	} else {
-		b.WriteString(banner(st) + "\n\n")
 	}
 
 	for _, l := range m.lines {
