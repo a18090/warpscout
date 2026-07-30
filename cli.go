@@ -70,6 +70,11 @@ func main() {
 		rootUsage(os.Stderr)
 		os.Exit(2)
 	}
+	switch os.Args[1] {
+	case "-h", "-help", "--help", "help":
+		rootUsage(os.Stdout)
+		os.Exit(0)
+	}
 	cmd := lookupCommand(os.Args[1])
 	if cmd == nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("unknown command %q", os.Args[1])))
