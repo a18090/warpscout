@@ -114,6 +114,11 @@ func runScanCmd(ctx context.Context, opts options) error {
 
 	if len(opts.colos) > 0 {
 		phases = filterByColo(phases, opts.colos)
+	}
+	if len(opts.countries) > 0 {
+		phases = filterByCountry(phases, opts.countries)
+	}
+	if len(opts.colos) > 0 || len(opts.countries) > 0 {
 		pools = poolsWithHits(phases)
 	}
 
@@ -165,8 +170,15 @@ func anyEndpoint(phases []phaseResult) bool {
 }
 
 func noEndpointMsg(opts options) string {
+	var filters []string
 	if len(opts.colos) > 0 {
-		return "no endpoint landed on " + strings.Join(opts.colos, ", ")
+		filters = append(filters, "node "+strings.Join(opts.colos, ", "))
+	}
+	if len(opts.countries) > 0 {
+		filters = append(filters, "country "+strings.Join(opts.countries, ", "))
+	}
+	if len(filters) > 0 {
+		return "no endpoint landed on " + strings.Join(filters, " and ")
 	}
 	return "no working endpoints found"
 }

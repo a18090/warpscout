@@ -148,15 +148,38 @@ func poolsWithHits(phases []phaseResult) []netip.Prefix {
 }
 
 func filterByColo(phases []phaseResult, colos []string) []phaseResult {
-	keep := make(map[string]struct{}, len(colos))
-	for _, c := range colos {
-		keep[c] = struct{}{}
+	keep := upperSet(colos)
+	return filterResults(phases, func(r endpointResult) bool {
+		_, ok := keep[strings.ToUpper(r.exit.colo)]
+		return ok
+	})
+}
+
+func filterByCountry(phases []phaseResult, countries []string) []phaseResult {
+	keep := upperSet(countries)
+	return filterResults(phases, func(r endpointResult) bool {
+		if r.exit.coloISO == "" {
+			return false
+		}
+		_, ok := keep[strings.ToUpper(r.exit.coloISO)]
+		return ok
+	})
+}
+
+func upperSet(vals []string) map[string]struct{} {
+	set := make(map[string]struct{}, len(vals))
+	for _, v := range vals {
+		set[strings.ToUpper(v)] = struct{}{}
 	}
+	return set
+}
+
+func filterResults(phases []phaseResult, keep func(endpointResult) bool) []phaseResult {
 	out := make([]phaseResult, 0, len(phases))
 	for _, ph := range phases {
 		var kept []endpointResult
 		for _, r := range ph.results {
-			if _, ok := keep[strings.ToUpper(r.exit.colo)]; ok {
+			if keep(r) {
 				kept = append(kept, r)
 			}
 		}

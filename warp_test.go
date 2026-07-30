@@ -413,6 +413,25 @@ func TestFilterByColo(t *testing.T) {
 	}
 }
 
+func TestFilterByCountry(t *testing.T) {
+	phases := []phaseResult{{run: protoRun{true, "awg"}, results: []endpointResult{
+		{endpoint: "1.1.1.1:2408", exit: metaResult{colo: "HEL", coloISO: "FI"}},
+		{endpoint: "2.2.2.2:2408", exit: metaResult{colo: "FRA", coloISO: "DE"}},
+		{endpoint: "3.3.3.3:2408"},
+	}}}
+
+	got := filterByCountry(phases, []string{"DE"})
+	if len(got) != 1 || len(got[0].results) != 1 {
+		t.Fatalf("filterByCountry kept %v results, want 1", got)
+	}
+	if ep := got[0].results[0].endpoint; ep != "2.2.2.2:2408" {
+		t.Errorf("filterByCountry kept %s, want the FRA endpoint", ep)
+	}
+	if got := filterByCountry(phases, []string{"US"}); len(got[0].results) != 0 {
+		t.Errorf("filterByCountry(US) kept %v, want nothing", got[0].results)
+	}
+}
+
 func TestFlagEmoji(t *testing.T) {
 	showEmoji = true
 	t.Cleanup(func() { showEmoji = false })

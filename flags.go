@@ -27,8 +27,10 @@ type options struct {
 	i1Host         string
 	target         string
 	node           string
+	country        string
 	targets        []netip.Prefix
 	colos          []string
+	countries      []string
 	best           bool
 	tableOff       bool
 	i1Explicit     bool
@@ -88,7 +90,8 @@ var (
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
 		{"", "conf", "FILE", "write a ready-to-import wg/awg config for the best endpoint"},
 		{"", "table-off", "", "add \"Table = off\" to the generated config: bring the interface up without touching routes"},
-		{"", "node", "COLO", "keep only endpoints landing on these colos: comma-separated IATA codes"},
+		{"", "node", "COLO", "keep only endpoints landing on these edge nodes: comma-separated IATA codes"},
+		{"", "country", "ISO", "keep only endpoints whose edge node sits in these countries: comma-separated ISO codes"},
 		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
 		{"", "emoji", "", "prefix the colo region with a country flag emoji (rendering depends on the terminal)"},
@@ -164,6 +167,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.IntVar(&o.pingCount, "ping-count", 0, "")
 	boolFlag(fs, &o.full, "f", "full")
 	fs.StringVar(&o.node, "node", "", "")
+	fs.StringVar(&o.country, "country", "", "")
 	fs.BoolVar(&o.best, "best", false, "")
 	fs.StringVar(&o.conf, "conf", "", "")
 	fs.BoolVar(&o.tableOff, "table-off", false, "")
@@ -253,18 +257,25 @@ func applyTarget(o *options) {
 }
 
 func applyNode(o *options) {
-	if o.node == "" {
-		return
+	o.colos = splitList(o.node, "-node")
+	o.countries = splitList(o.country, "-country")
+}
+
+func splitList(value, flagName string) []string {
+	if value == "" {
+		return nil
 	}
-	for _, code := range strings.Split(o.node, ",") {
-		if code = strings.ToUpper(strings.TrimSpace(code)); code != "" {
-			o.colos = append(o.colos, code)
+	var out []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.ToUpper(strings.TrimSpace(item)); item != "" {
+			out = append(out, item)
 		}
 	}
-	if len(o.colos) == 0 {
-		fmt.Fprintln(os.Stderr, "-node is empty")
+	if len(out) == 0 {
+		fmt.Fprintln(os.Stderr, flagName+" is empty")
 		os.Exit(2)
 	}
+	return out
 }
 
 func applyGenI1(fs *flag.FlagSet, o *options) {
