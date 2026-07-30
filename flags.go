@@ -32,6 +32,7 @@ type options struct {
 	colos          []string
 	countries      []string
 	best           bool
+	noReport       bool
 	tableOff       bool
 	i1Explicit     bool
 	pingCheck      bool
@@ -88,6 +89,7 @@ var (
 
 	outputGroup = flagGroup{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
+		{"", "no-report", "", "skip the report file entirely (overrides -o)"},
 		{"", "conf", "FILE", "write a ready-to-import wg/awg config for the best endpoint"},
 		{"", "table-off", "", "add \"Table = off\" to the generated config: bring the interface up without touching routes"},
 		{"", "node", "COLO", "keep only endpoints landing on these edge nodes: comma-separated IATA codes"},
@@ -163,6 +165,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	intFlag(fs, &o.perSubnet, 5, "n", "sample")
 	strFlag(fs, &o.proto, protoWG, "p", "proto")
 	strFlag(fs, &o.output, "", "o", "output")
+	fs.BoolVar(&o.noReport, "no-report", false, "")
 	boolFlag(fs, &o.pingCheck, "P", "ping")
 	fs.IntVar(&o.pingCount, "ping-count", 0, "")
 	boolFlag(fs, &o.full, "f", "full")

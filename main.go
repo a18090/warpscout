@@ -142,6 +142,10 @@ func runScanCmd(ctx context.Context, opts options) error {
 		writeConfFile(opts, phases)
 	}
 
+	if opts.noReport {
+		return nil
+	}
+
 	reportPath := opts.output
 	// A pipe consumer asked for one line, not a stray report file.
 	if reportPath == "" && opts.best {
