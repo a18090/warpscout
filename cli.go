@@ -90,7 +90,7 @@ func main() {
 	fs.Parse(os.Args[2:])
 	applyCommonFlags(fs, &opts)
 
-	showEmoji = opts.emoji && !usePlainOutput(opts)
+	showEmoji = opts.emoji
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
