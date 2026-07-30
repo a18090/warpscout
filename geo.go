@@ -11,14 +11,14 @@ import (
 
 var coloISO map[string]string
 
-var noEmoji bool
+var showEmoji bool
 
 func coloFlag(colo string) string { return flagEmoji(coloISO[colo]) }
 
 const regionalIndicatorA = 0x1F1E6
 
 func flagEmoji(iso string) string {
-	if noEmoji {
+	if !showEmoji {
 		return ""
 	}
 	if len(iso) != 2 {

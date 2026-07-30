@@ -414,6 +414,8 @@ func TestFilterByColo(t *testing.T) {
 }
 
 func TestFlagEmoji(t *testing.T) {
+	showEmoji = true
+	t.Cleanup(func() { showEmoji = false })
 	cases := map[string]string{
 		"RU":  "\U0001F1F7\U0001F1FA",
 		"de":  "\U0001F1E9\U0001F1EA",

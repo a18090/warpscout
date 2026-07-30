@@ -38,7 +38,7 @@ type options struct {
 	ipv6           bool
 	full           bool
 	plain          bool
-	noEmoji        bool
+	emoji          bool
 }
 
 type flagSpec struct {
@@ -91,7 +91,7 @@ var (
 		{"", "node", "COLO", "keep only endpoints landing on these colos: comma-separated IATA codes"},
 		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
-		{"", "no-emoji", "", "drop country flag emoji (for terminals that can't render them)"},
+		{"", "emoji", "", "prefix the colo region with a country flag emoji (rendering depends on the terminal)"},
 	}}
 
 	registerGroup = flagGroup{"Registration", append([]flagSpec{
@@ -168,7 +168,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.StringVar(&o.conf, "conf", "", "")
 	fs.BoolVar(&o.tableOff, "table-off", false, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
-	fs.BoolVar(&o.noEmoji, "no-emoji", false, "")
+	fs.BoolVar(&o.emoji, "emoji", false, "")
 	o.wantTrace = true
 }
 
