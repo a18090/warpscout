@@ -13,10 +13,10 @@ import (
 
 // register needs this too - its tunnel fallback registers through one of the
 // sampled addresses.
-func setupScan(opts options) ([]protoRun, []netip.Addr, error) {
-	runs, err := parseProto(opts.proto)
+func setupScan(opts options) (protoRun, []netip.Addr, error) {
+	run, err := parseProto(opts.proto)
 	if err != nil {
-		return nil, nil, err
+		return run, nil, err
 	}
 
 	if opts.ipv6 {
@@ -29,23 +29,23 @@ func setupScan(opts options) ([]protoRun, []netip.Addr, error) {
 	// precise error); the host-wide check only runs without it.
 	if opts.iface != "" {
 		if !deviceBindSupported {
-			return nil, nil, fmt.Errorf("-interface requires Linux (SO_BINDTODEVICE)")
+			return run, nil, fmt.Errorf("-interface requires Linux (SO_BINDTODEVICE)")
 		}
 		ip, err := interfaceAddr(opts.iface, opts.ipv6)
 		if err != nil {
-			return nil, nil, err
+			return run, nil, err
 		}
 		scanInterface = opts.iface
 		scanSourceIP = ip
 	} else if !haveAddrFamily(opts.ipv6) {
-		return nil, nil, fmt.Errorf("no routable %s address on this host - nothing to scan", famName(opts.ipv6))
+		return run, nil, fmt.Errorf("no routable %s address on this host - nothing to scan", famName(opts.ipv6))
 	}
 
 	sample := opts.perSubnet
 	if opts.full {
 		sample = 0
 	}
-	return runs, expandPools(sample), nil
+	return run, expandPools(sample), nil
 }
 
 func loadScanAccount(path string) error {
@@ -87,58 +87,53 @@ func runFindJunkCmd(ctx context.Context, opts options) error {
 	if err := loadScanAccount(opts.accountPath); err != nil {
 		return err
 	}
-	runs, _, err := setupScan(opts)
+	run, _, err := setupScan(opts)
 	if err != nil {
 		return err
 	}
-	return runFindJunk(ctx, opts, runs, time.Duration(opts.timeoutSec)*time.Second)
+	return runFindJunk(ctx, opts, run, time.Duration(opts.timeoutSec)*time.Second)
 }
 
 func runScanCmd(ctx context.Context, opts options) error {
 	if err := loadScanAccount(opts.accountPath); err != nil {
 		return err
 	}
-	runs, ips, err := setupScan(opts)
+	run, ips, err := setupScan(opts)
 	if err != nil {
 		return err
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	phases, err := runScanUI(ctx, cancel, opts, runs, ips, time.Duration(opts.timeoutSec)*time.Second, "", "")
+	ph, err := runScanUI(ctx, cancel, opts, run, ips, time.Duration(opts.timeoutSec)*time.Second, "", "")
 	if err != nil {
 		// runScan already reported the failure through the emit seam.
 		os.Exit(1)
 	}
 
 	if len(opts.colos) > 0 {
-		phases = filterByColo(phases, opts.colos)
+		ph = filterByColo(ph, opts.colos)
 	}
 	if len(opts.countries) > 0 {
-		phases = filterByCountry(phases, opts.countries)
+		ph = filterByCountry(ph, opts.countries)
 	}
 	if len(opts.colos) > 0 || len(opts.countries) > 0 {
-		pools = poolsWithHits(phases)
+		pools = poolsWithHits(ph)
 	}
 
 	// Nothing to report: say so on stderr and fail, instead of leaving a report
 	// file whose only content is "No working endpoints found".
-	if !anyEndpoint(phases) {
+	if !anyEndpoint(ph) {
 		return fmt.Errorf("%s", noEndpointMsg(opts))
 	}
 
 	if opts.best {
-		printBest(phases)
+		printBest(ph)
 	} else {
-		out := consoleRenderer(os.Stdout)
-		if len(phases) == 1 {
-			writeConsole(os.Stdout, phases[0], out, opts.pingCheck)
-		} else {
-			writeConsoleBoth(os.Stdout, phases, out, opts.pingCheck)
-		}
+		writeConsole(os.Stdout, ph, consoleRenderer(os.Stdout), opts.pingCheck)
 	}
 	if opts.conf != "" {
-		writeConfFile(opts, phases)
+		writeConfFile(opts, ph)
 	}
 
 	if opts.noReport {
@@ -153,7 +148,7 @@ func runScanCmd(ctx context.Context, opts options) error {
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
 	}
-	if err := writeToFile(reportPath, phases, opts.pingCheck); err != nil {
+	if err := writeToFile(reportPath, ph, opts.pingCheck); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", reportPath, err)))
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
@@ -161,12 +156,10 @@ func runScanCmd(ctx context.Context, opts options) error {
 	return nil
 }
 
-func anyEndpoint(phases []phaseResult) bool {
-	for _, ph := range phases {
-		for _, r := range ph.results {
-			if r.ok {
-				return true
-			}
+func anyEndpoint(ph phaseResult) bool {
+	for _, r := range ph.results {
+		if r.ok {
+			return true
 		}
 	}
 	return false
@@ -188,35 +181,32 @@ func noEndpointMsg(opts options) string {
 
 const noWorkingMsg = "every matching endpoint is flaky"
 
-func writeConfFile(opts options, phases []phaseResult) {
-	best, run, ok := bestOverall(phases)
+func writeConfFile(opts options, ph phaseResult) {
+	best, ok := bestOverall(ph)
 	if !ok {
 		fmt.Fprintln(os.Stderr, errPal.fail(noWorkingMsg))
 		return
 	}
-	if err := writeConf(opts, best.endpoint, run.awg); err != nil {
+	if err := writeConf(opts, best.endpoint, ph.run.awg); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", opts.conf, err)))
 		return
 	}
-	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", run.name, best.endpoint, opts.conf)))
+	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))
 }
 
-func bestOverall(phases []phaseResult) (endpointResult, protoRun, bool) {
+func bestOverall(ph phaseResult) (endpointResult, bool) {
 	var best endpointResult
-	var run protoRun
 	found := false
-	for _, ph := range phases {
-		for _, r := range workingSorted(ph.results) {
-			if !found || lessByLossRTT(r, best) {
-				best, run, found = r, ph.run, true
-			}
+	for _, r := range workingSorted(ph.results) {
+		if !found || lessByLossRTT(r, best) {
+			best, found = r, true
 		}
 	}
-	return best, run, found
+	return best, found
 }
 
-func printBest(phases []phaseResult) {
-	best, _, ok := bestOverall(phases)
+func printBest(ph phaseResult) {
+	best, ok := bestOverall(ph)
 	if !ok {
 		fmt.Fprintln(os.Stderr, errPal.fail(noWorkingMsg))
 		os.Exit(1)
@@ -224,9 +214,9 @@ func printBest(phases []phaseResult) {
 	fmt.Println(best.endpoint)
 }
 
-func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, header, quitHint string) ([]phaseResult, error) {
+func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, run protoRun, ips []netip.Addr, timeout time.Duration, header, quitHint string) (phaseResult, error) {
 	if usePlainOutput(opts) {
-		return runScan(ctx, opts, runs, ips, timeout, plainEmit)
+		return runScan(ctx, opts, run, ips, timeout, plainEmit)
 	}
 
 	m := newScanModel(cancel, opts.pingCheck)
@@ -236,74 +226,70 @@ func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, run
 	}
 	p := tea.NewProgram(m, tea.WithOutput(os.Stderr))
 
-	var phases []phaseResult
+	var ph phaseResult
 	var scanErr error
 	scanDone := make(chan struct{})
 	go func() {
-		phases, scanErr = runScan(ctx, opts, runs, ips, timeout, p.Send)
+		ph, scanErr = runScan(ctx, opts, run, ips, timeout, p.Send)
 		close(scanDone)
 	}()
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-		return nil, err
+		return phaseResult{}, err
 	}
 	<-scanDone
-	return phases, scanErr
+	return ph, scanErr
 }
 
 func usePlainOutput(opts options) bool {
 	return opts.plain || os.Getenv("NO_COLOR") != "" || !isTerminal(os.Stderr)
 }
 
-func runScan(ctx context.Context, opts options, runs []protoRun, ips []netip.Addr, timeout time.Duration, emit emitter) ([]phaseResult, error) {
+func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, timeout time.Duration, emit emitter) (phaseResult, error) {
 	if scanSourceIP.IsValid() {
 		emit(stepMsg{done: true, label: "Interface", summary: fmt.Sprintf("%s (%s)", opts.iface, scanSourceIP)})
 	}
-	open, err := reachablePorts(ctx, anyAWG(runs), ips, timeout, portProbeSample, emit)
+	open, err := reachablePorts(ctx, run.awg, ips, timeout, portProbeSample, emit)
 	if err != nil {
 		emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
-		return nil, err
+		return phaseResult{}, err
 	}
 	if len(open) == 0 {
 		emit(stepMsg{fail: true, summary: "no WARP port is reachable on this network"})
-		return nil, fmt.Errorf("no reachable WARP port")
+		return phaseResult{}, fmt.Errorf("no reachable WARP port")
 	}
 	warpPorts = open
 
-	var phases []phaseResult
-	for _, run := range runs {
-		results := make([]endpointResult, len(ips))
-		pings := opts.pingCount
-		label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
-		emit(barBeginMsg{label: label, total: len(ips)})
-		work := func(tn *tunnel, i int) {
-			defer emit(probedMsg{})
-			ip := ips[i]
-			r := endpointResult{ip: ip}
-			if t, endpoint, ok, rtt, loss, flaky := tn.probe(ctx, ip, timeout, pings, opts.wantMeta); ok {
-				r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
-				if pings > 0 {
-					r.rtt, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
-				}
-				if hrtt, pok := pingHost(ip, timeout); pok {
-					r.latency = hrtt
-				}
-				found := foundMsg{endpoint: endpoint, latency: r.ping(), loss: r.loss, measured: r.measured, flaky: !r.durable}
-				if opts.wantMeta {
-					found.exit, found.colo = exitRegion(t), exitColo(t)
-				}
-				emit(found)
+	results := make([]endpointResult, len(ips))
+	pings := opts.pingCount
+	label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
+	emit(barBeginMsg{label: label, total: len(ips)})
+	work := func(tn *tunnel, i int) {
+		defer emit(probedMsg{})
+		ip := ips[i]
+		r := endpointResult{ip: ip}
+		if t, endpoint, ok, rtt, loss, flaky := tn.probe(ctx, ip, timeout, pings, opts.wantMeta); ok {
+			r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
+			if pings > 0 {
+				r.rtt, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
 			}
-			results[i] = r
+			if hrtt, pok := pingHost(ip, timeout); pok {
+				r.latency = hrtt
+			}
+			found := foundMsg{endpoint: endpoint, latency: r.ping(), loss: r.loss, measured: r.measured, flaky: !r.durable}
+			if opts.wantMeta {
+				found.exit, found.colo = exitRegion(t), exitColo(t)
+			}
+			emit(found)
 		}
-		if err := runTunnelPool(opts.tunnelParallel, run.awg, len(ips), work); err != nil {
-			emit(stepMsg{fail: true, summary: err.Error()})
-			return nil, err
-		}
-		emit(barEndMsg{label: label, summary: "done"})
-		phases = append(phases, phaseResult{run, results})
+		results[i] = r
 	}
+	if err := runTunnelPool(opts.tunnelParallel, run.awg, len(ips), work); err != nil {
+		emit(stepMsg{fail: true, summary: err.Error()})
+		return phaseResult{}, err
+	}
+	emit(barEndMsg{label: label, summary: "done"})
 
 	emit(doneMsg{})
-	return phases, nil
+	return phaseResult{run, results}, nil
 }

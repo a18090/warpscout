@@ -92,15 +92,6 @@ func interfaceAddr(name string, v6 bool) (netip.Addr, error) {
 	return netip.Addr{}, fmt.Errorf("interface %s has no %s address", name, famName(v6))
 }
 
-func anyAWG(runs []protoRun) bool {
-	for _, r := range runs {
-		if r.awg {
-			return true
-		}
-	}
-	return false
-}
-
 func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, sample int, emit emitter) ([]int, error) {
 	tn, err := newTunnel(awg)
 	if err != nil {

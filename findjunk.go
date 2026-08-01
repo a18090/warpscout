@@ -32,7 +32,7 @@ func (c junkCandidate) String() string {
 	return fmt.Sprintf("jc=%d jmin=%d jmax=%d  %d/%d working", c.jc, c.jmin, c.jmax, c.working, c.total)
 }
 
-func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout time.Duration) error {
+func runFindJunk(ctx context.Context, opts options, run protoRun, timeout time.Duration) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 	ctx, cancel := context.WithCancel(ctx)
@@ -58,7 +58,7 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 			fmt.Fprintln(os.Stderr, errPal.dim(header))
 		}
 
-		phases, err := runScanUI(ctx, cancel, opts, runs, expandPools(opts.perSubnet), timeout, header, findJunkQuitHint)
+		ph, err := runScanUI(ctx, cancel, opts, run, expandPools(opts.perSubnet), timeout, header, findJunkQuitHint)
 		if ctx.Err() != nil {
 			break
 		}
@@ -67,7 +67,7 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 			continue
 		}
 
-		c := scoreJunk(phases)
+		c := scoreJunk(ph)
 		summary := "Attempt " + fmt.Sprint(attempt) + ": " + c.String()
 		if c.meets(opts.junkThreshold) {
 			fmt.Fprintln(os.Stderr, errPal.ok(summary))
@@ -90,12 +90,9 @@ func runFindJunk(ctx context.Context, opts options, runs []protoRun, timeout tim
 	return reportJunk(best, false)
 }
 
-func scoreJunk(phases []phaseResult) junkCandidate {
+func scoreJunk(ph phaseResult) junkCandidate {
 	c := junkCandidate{jc: awgJc, jmin: awgJmin, jmax: awgJmax, i1: awgI1, i1Label: genI1Label}
-	if len(phases) == 0 {
-		return c
-	}
-	for _, r := range phases[0].results {
+	for _, r := range ph.results {
 		c.total++
 		if r.working() {
 			c.working++

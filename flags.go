@@ -74,7 +74,7 @@ var (
 	}, netSpecs...)}
 
 	protoGroup = flagGroup{"Protocol", []flagSpec{
-		{"p", "proto", "wg|awg|both", "tunnel protocol: wg (WireGuard), awg (AmneziaWG), or both"},
+		{"p", "proto", "wg|awg", "tunnel protocol: wg (WireGuard) or awg (AmneziaWG)"},
 	}}
 
 	awgGroup = flagGroup{"AmneziaWG obfuscation parameters", []flagSpec{
@@ -235,7 +235,7 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	}
 	if o.genJunk {
 		if o.proto == protoWG {
-			fmt.Fprintln(os.Stderr, "-gen-junk needs AmneziaWG: use -proto awg or -proto both")
+			fmt.Fprintln(os.Stderr, "-gen-junk needs AmneziaWG: use -proto awg")
 			os.Exit(2)
 		}
 		applyGenJunk(fs)
@@ -293,7 +293,7 @@ func applyGenI1(fs *flag.FlagSet, o *options) {
 		return
 	}
 	if o.proto == protoWG {
-		fmt.Fprintln(os.Stderr, "-gen-i1 needs AmneziaWG: use -proto awg or -proto both")
+		fmt.Fprintln(os.Stderr, "-gen-i1 needs AmneziaWG: use -proto awg")
 		os.Exit(2)
 	}
 	if explicit["i1"] {

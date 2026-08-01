@@ -306,17 +306,29 @@ func TestJunkCommand(t *testing.T) {
 	}
 }
 
+func TestParseProto(t *testing.T) {
+	for _, p := range []string{protoWG, protoAWG} {
+		run, err := parseProto(p)
+		if err != nil || run.name != p || run.awg != (p == protoAWG) {
+			t.Errorf("parseProto(%q) = %+v, %v", p, run, err)
+		}
+	}
+	if _, err := parseProto("both"); err == nil {
+		t.Error("parseProto(\"both\") accepted, want an error")
+	}
+}
+
 func TestScoreJunk(t *testing.T) {
-	phases := []phaseResult{{results: []endpointResult{
+	ph := phaseResult{results: []endpointResult{
 		{ok: true, durable: true},
 		{ok: true, durable: false},
 		{},
-	}}}
-	if c := scoreJunk(phases); c.working != 1 || c.total != 3 {
+	}}
+	if c := scoreJunk(ph); c.working != 1 || c.total != 3 {
 		t.Errorf("scoreJunk() = %d/%d, want 1/3", c.working, c.total)
 	}
-	if c := scoreJunk(nil); c.total != 0 {
-		t.Errorf("scoreJunk(nil) total = %d, want 0", c.total)
+	if c := scoreJunk(phaseResult{}); c.total != 0 {
+		t.Errorf("scoreJunk(empty) total = %d, want 0", c.total)
 	}
 }
 
@@ -439,40 +451,40 @@ func TestExpandTargets(t *testing.T) {
 }
 
 func TestFilterByColo(t *testing.T) {
-	phases := []phaseResult{{run: protoRun{true, "awg"}, results: []endpointResult{
+	ph := phaseResult{run: protoRun{true, "awg"}, results: []endpointResult{
 		{endpoint: "1.1.1.1:2408", exit: metaResult{colo: "HEL"}},
 		{endpoint: "2.2.2.2:2408", exit: metaResult{colo: "FRA"}},
 		{endpoint: "3.3.3.3:2408"},
-	}}}
+	}}
 
-	got := filterByColo(phases, []string{"HEL"})
-	if len(got) != 1 || len(got[0].results) != 1 {
-		t.Fatalf("filterByColo kept %v results, want 1", got)
+	got := filterByColo(ph, []string{"HEL"})
+	if len(got.results) != 1 {
+		t.Fatalf("filterByColo kept %v results, want 1", got.results)
 	}
-	if ep := got[0].results[0].endpoint; ep != "1.1.1.1:2408" {
+	if ep := got.results[0].endpoint; ep != "1.1.1.1:2408" {
 		t.Errorf("filterByColo kept %s, want the HEL endpoint", ep)
 	}
-	if got[0].run.name != "awg" {
+	if got.run.name != "awg" {
 		t.Error("filterByColo dropped the proto run")
 	}
 }
 
 func TestFilterByCountry(t *testing.T) {
-	phases := []phaseResult{{run: protoRun{true, "awg"}, results: []endpointResult{
+	ph := phaseResult{run: protoRun{true, "awg"}, results: []endpointResult{
 		{endpoint: "1.1.1.1:2408", exit: metaResult{colo: "HEL", coloISO: "FI"}},
 		{endpoint: "2.2.2.2:2408", exit: metaResult{colo: "FRA", coloISO: "DE"}},
 		{endpoint: "3.3.3.3:2408"},
-	}}}
+	}}
 
-	got := filterByCountry(phases, []string{"DE"})
-	if len(got) != 1 || len(got[0].results) != 1 {
-		t.Fatalf("filterByCountry kept %v results, want 1", got)
+	got := filterByCountry(ph, []string{"DE"})
+	if len(got.results) != 1 {
+		t.Fatalf("filterByCountry kept %v results, want 1", got.results)
 	}
-	if ep := got[0].results[0].endpoint; ep != "2.2.2.2:2408" {
+	if ep := got.results[0].endpoint; ep != "2.2.2.2:2408" {
 		t.Errorf("filterByCountry kept %s, want the FRA endpoint", ep)
 	}
-	if got := filterByCountry(phases, []string{"US"}); len(got[0].results) != 0 {
-		t.Errorf("filterByCountry(US) kept %v, want nothing", got[0].results)
+	if got := filterByCountry(ph, []string{"US"}); len(got.results) != 0 {
+		t.Errorf("filterByCountry(US) kept %v, want nothing", got.results)
 	}
 }
 

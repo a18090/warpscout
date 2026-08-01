@@ -138,30 +138,27 @@ func exitColoLocation(t metaResult) string { return coloLocation(t) }
 
 // An empty row is only worth showing when the scan really covered the whole
 // subnet, so subnets a filter emptied are dropped.
-func poolsWithHits(phases []phaseResult) []netip.Prefix {
+func poolsWithHits(ph phaseResult) []netip.Prefix {
 	out := make([]netip.Prefix, 0, len(pools))
 	for _, p := range pools {
-		for _, ph := range phases {
-			if len(subnetEndpoints(ph.results, p)) > 0 {
-				out = append(out, p)
-				break
-			}
+		if len(subnetEndpoints(ph.results, p)) > 0 {
+			out = append(out, p)
 		}
 	}
 	return out
 }
 
-func filterByColo(phases []phaseResult, colos []string) []phaseResult {
+func filterByColo(ph phaseResult, colos []string) phaseResult {
 	keep := upperSet(colos)
-	return filterResults(phases, func(r endpointResult) bool {
+	return filterResults(ph, func(r endpointResult) bool {
 		_, ok := keep[strings.ToUpper(r.exit.colo)]
 		return ok
 	})
 }
 
-func filterByCountry(phases []phaseResult, countries []string) []phaseResult {
+func filterByCountry(ph phaseResult, countries []string) phaseResult {
 	keep := upperSet(countries)
-	return filterResults(phases, func(r endpointResult) bool {
+	return filterResults(ph, func(r endpointResult) bool {
 		if r.exit.coloISO == "" {
 			return false
 		}
@@ -178,18 +175,14 @@ func upperSet(vals []string) map[string]struct{} {
 	return set
 }
 
-func filterResults(phases []phaseResult, keep func(endpointResult) bool) []phaseResult {
-	out := make([]phaseResult, 0, len(phases))
-	for _, ph := range phases {
-		var kept []endpointResult
-		for _, r := range ph.results {
-			if keep(r) {
-				kept = append(kept, r)
-			}
+func filterResults(ph phaseResult, keep func(endpointResult) bool) phaseResult {
+	var kept []endpointResult
+	for _, r := range ph.results {
+		if keep(r) {
+			kept = append(kept, r)
 		}
-		out = append(out, phaseResult{ph.run, kept})
 	}
-	return out
+	return phaseResult{ph.run, kept}
 }
 
 func workingSorted(results []endpointResult) []endpointResult {
@@ -447,132 +440,6 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult,
 	fmt.Fprintln(w, t.Render())
 }
 
-type bothRow struct {
-	cells                 []string
-	wgStat, awgStat, pick int
-	loss                  float32
-	latency               time.Duration
-}
-
-func writeConsoleBoth(w io.Writer, phases []phaseResult, r *lipgloss.Renderer, ping bool) {
-	st := newConStyles(r)
-	var wg, awg []endpointResult
-	for _, ph := range phases {
-		if ph.run.awg {
-			awg = ph.results
-		} else {
-			wg = ph.results
-		}
-	}
-	wgWork, wgFlaky := workingSorted(wg), flakySorted(wg)
-	awgWork, awgFlaky := workingSorted(awg), flakySorted(awg)
-
-	probed := len(wg)
-	if probed == 0 {
-		probed = len(awg)
-	}
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, banner(st))
-	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Working:  wg %s%sawg %s of %d probed\n",
-		st.ok.Render(strconv.Itoa(len(wgWork))), st.dim.Render(" / "), st.ok.Render(strconv.Itoa(len(awgWork))), probed)
-	writeJunkNote(w, st, true)
-	fmt.Fprintln(w)
-
-	protoStatus := func(work, flaky []endpointResult, p netip.Prefix) (string, int) {
-		if len(subnetEndpoints(work, p)) > 0 {
-			return "OK", statusOK
-		}
-		if len(subnetEndpoints(flaky, p)) > 0 {
-			return "flaky", statusFlaky
-		}
-		return "-", statusNone
-	}
-
-	var rows []bothRow
-	for _, p := range pools {
-		wgTxt, wgStat := protoStatus(wgWork, wgFlaky, p)
-		awgTxt, awgStat := protoStatus(awgWork, awgFlaky, p)
-		r, found, isFlaky := bestPick(p, wgWork, awgWork, wgFlaky, awgFlaky)
-		endpoint, pingStr, region, colo, coloReg := r.endpoint, r.pingStr(), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit)
-		loss := lossCell(r, ping)
-		pick := statusOK
-		if isFlaky {
-			pick = statusFlaky
-		}
-		if !found {
-			endpoint, pingStr, region, colo, coloReg, pick = "-", "", "", "", "", statusNone
-			if ping {
-				loss = []string{""}
-			}
-		}
-		cells := append([]string{p.String(), wgTxt, awgTxt, endpoint, pingStr}, loss...)
-		cells = append(cells, region, colo, coloReg)
-		rows = append(rows, bothRow{cells, wgStat, awgStat, pick, r.loss, r.ping()})
-	}
-	sort.SliceStable(rows, func(i, j int) bool {
-		return lessLossDur(rows[i].loss, rows[i].latency, rows[j].loss, rows[j].latency)
-	})
-
-	protoStyle := func(s int) lipgloss.Style {
-		switch s {
-		case statusOK:
-			return st.cell.Foreground(okColor)
-		case statusFlaky:
-			return st.cell.Foreground(warnColor)
-		}
-		return st.cell.Foreground(dimColor)
-	}
-
-	headers := append([]string{"SUBNET", "WG", "AWG", "ENDPOINT", "PING"}, lossHeader(ping)...)
-	headers = append(headers, "SEEN AS", "NODE", "NODE LOCATION")
-	accentCols := metricCols(ping, 4)
-
-	fmt.Fprintln(w, st.title.Render("WireGuard vs AmneziaWG per subnet"))
-	t := table.New().
-		Border(lipgloss.RoundedBorder()).
-		BorderStyle(st.dim).
-		Headers(headers...).
-		StyleFunc(func(row, col int) lipgloss.Style {
-			if row == table.HeaderRow {
-				return st.cell.Bold(true)
-			}
-			br := rows[row]
-			switch col {
-			case 1:
-				return protoStyle(br.wgStat)
-			case 2:
-				return protoStyle(br.awgStat)
-			}
-			switch br.pick {
-			case statusFlaky:
-				return st.cell.Foreground(warnColor)
-			case statusNone:
-				return st.cell.Foreground(dimColor)
-			}
-			if col == 3 {
-				return st.cell.Bold(true)
-			}
-			if accentCols[col] {
-				return st.cell.Foreground(accentColor)
-			}
-			return st.cell
-		})
-	for _, br := range rows {
-		t.Row(br.cells...)
-	}
-	fmt.Fprintln(w, t.Render())
-}
-
-func bestPick(p netip.Prefix, sets ...[]endpointResult) (best endpointResult, found, flaky bool) {
-	for i, set := range sets {
-		if picks := subnetEndpoints(set, p); len(picks) > 0 {
-			return bestByPing(picks), true, i >= 2
-		}
-	}
-	return endpointResult{}, false, false
-}
-
 func uniqueSorted(working []endpointResult, key func(endpointResult) string, flagFor func(string) string) string {
 	seen := make(map[string]struct{})
 	for _, r := range working {
@@ -617,20 +484,12 @@ type phaseResult struct {
 	results []endpointResult
 }
 
-func writeToFile(path string, phases []phaseResult, ping bool) error {
+func writeToFile(path string, ph phaseResult, ping bool) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	for i, ph := range phases {
-		if len(phases) > 1 {
-			if i > 0 {
-				fmt.Fprintln(f)
-			}
-			fmt.Fprintf(f, "########## proto=%s ##########\n", ph.run.name)
-		}
-		writeFullReport(f, ph.results, ping)
-	}
+	writeFullReport(f, ph.results, ping)
 	return nil
 }

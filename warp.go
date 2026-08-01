@@ -132,23 +132,18 @@ type protoRun struct {
 }
 
 const (
-	protoWG   = "wg"
-	protoAWG  = "awg"
-	protoBoth = "both"
+	protoWG  = "wg"
+	protoAWG = "awg"
 )
 
-func parseProto(p string) ([]protoRun, error) {
-	wg := protoRun{false, protoWG}
-	awg := protoRun{true, protoAWG}
+func parseProto(p string) (protoRun, error) {
 	switch p {
 	case protoWG:
-		return []protoRun{wg}, nil
+		return protoRun{false, protoWG}, nil
 	case protoAWG:
-		return []protoRun{awg}, nil
-	case protoBoth:
-		return []protoRun{wg, awg}, nil
+		return protoRun{true, protoAWG}, nil
 	default:
-		return nil, fmt.Errorf("invalid -proto %q: use wg, awg or both", p)
+		return protoRun{}, fmt.Errorf("invalid -proto %q: use wg or awg", p)
 	}
 }
 
