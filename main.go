@@ -185,6 +185,12 @@ func noEndpointMsg(opts options) string {
 	if len(filters) > 0 {
 		return "no endpoint landed on " + strings.Join(filters, " and ")
 	}
+	if opts.genI1 == "" {
+		if opts.proto == protoAWG {
+			return "no working endpoints found - try -gen-i1 quic"
+		}
+		return "no working endpoints found - try -p awg -gen-i1 quic"
+	}
 	return "no working endpoints found"
 }
 
