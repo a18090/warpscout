@@ -313,11 +313,11 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 
 	fmt.Fprintln(w, banner(st))
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Proto:    %s\n", st.accent.Render(strings.ToUpper(ph.run.name)))
+	fmt.Fprintf(w, "Proto:     %s\n", st.accent.Render(strings.ToUpper(ph.run.name)))
 	writeJunkNote(w, st, ph.run.awg)
-	fmt.Fprintf(w, "Nodes:    %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, noFlag)))
-	fmt.Fprintf(w, "Seen as:  %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
-	fmt.Fprintf(w, "Working:  %s\n", st.ok.Render(strconv.Itoa(len(working)))+st.dim.Render(" / ")+strconv.Itoa(len(results))+" probed")
+	fmt.Fprintf(w, "Nodes:     %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, noFlag)))
+	fmt.Fprintf(w, "Seen as:   %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
+	fmt.Fprintf(w, "Working:   %s\n", st.ok.Render(strconv.Itoa(len(working)))+st.dim.Render(" / ")+strconv.Itoa(len(results))+" probed")
 	writeTornNote(w, st, len(torn))
 	writePicksTable(w, st, working, torn, ping)
 }
@@ -326,7 +326,7 @@ func writeJunkNote(w io.Writer, st conStyles, awg bool) {
 	if !awg {
 		return
 	}
-	fmt.Fprintf(w, "Junk:     %s %s\n",
+	fmt.Fprintf(w, "Junk:      %s %s\n",
 		st.accent.Render(fmt.Sprintf("jc=%d jmin=%d jmax=%d", awgJc, awgJmin, awgJmax)),
 		st.dim.Render("("+i1Note()+")"))
 }
@@ -335,8 +335,7 @@ func writeTornNote(w io.Writer, st conStyles, n int) {
 	if n == 0 {
 		return
 	}
-	// "Torn down:" is already 10 wide, the column the other labels pad to.
-	fmt.Fprintf(w, "%-10s%s\n", "Torn down:", st.warn.Render(fmt.Sprintf("%d (handshake ok, then cut mid-stream)", n)))
+	fmt.Fprintf(w, "%-11s%s\n", "Torn down:", st.warn.Render(fmt.Sprintf("%d (handshake ok, then cut mid-stream)", n)))
 }
 
 func banner(st conStyles) string {
