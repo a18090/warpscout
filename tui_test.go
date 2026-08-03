@@ -13,9 +13,9 @@ func TestScanModelFeed(t *testing.T) {
 	step := func(msg tea.Msg) { m, _ = m.Update(msg) }
 
 	step(barBeginMsg{label: "Phase 2", total: 3})
-	step(foundMsg{endpoint: "a:2408", latency: 50 * time.Millisecond})
-	step(foundMsg{endpoint: "b:2408", latency: 20 * time.Millisecond})
-	step(foundMsg{endpoint: "c:2408", latency: 0})
+	step(foundMsg{endpoint: "a:2408", epPing: 50 * time.Millisecond})
+	step(foundMsg{endpoint: "b:2408", epPing: 20 * time.Millisecond})
+	step(foundMsg{endpoint: "c:2408", epPing: 0})
 	step(probedMsg{})
 	step(probedMsg{})
 	step(probedMsg{})

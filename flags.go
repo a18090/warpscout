@@ -15,7 +15,7 @@ type options struct {
 	tunnelParallel int
 	timeoutSec     int
 	perSubnet      int
-	pingCount      int
+	tunPingCount   int
 	junkThreshold  int
 	mtu            int
 	proto          string
@@ -37,7 +37,7 @@ type options struct {
 	noReport       bool
 	tableOff       bool
 	i1Explicit     bool
-	pingCheck      bool
+	tunPingCheck   bool
 	genJunk        bool
 	wantMeta       bool
 	ipv6           bool
@@ -69,8 +69,8 @@ var (
 
 	scanGroup = flagGroup{"Scan tuning", append([]flagSpec{
 		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
-		{"P", "ping", "", "measure in-tunnel RTT and packet loss and flag flaky (DPI-torn-down) endpoints; off by default for speed"},
-		{"", "ping-count", "N", fmt.Sprintf("echoes per durability burst, %dms apart - a longer burst catches tunnels DPI kills late (default %d, implies -ping)", pingInterval.Milliseconds(), durabilityPings)},
+		{"P", "tun-ping", "", fmt.Sprintf("add the TUN PING/LOSS columns: RTT and packet loss measured inside the tunnel to %s, and flag flaky (DPI-torn-down) endpoints; off by default for speed", pingTarget)},
+		{"", "tun-ping-count", "N", fmt.Sprintf("echoes per durability burst, %dms apart - a longer burst catches tunnels DPI kills late (default %d, implies -tun-ping)", pingInterval.Milliseconds(), durabilityPings)},
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 	}, netSpecs...)}
@@ -170,8 +170,8 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	strFlag(fs, &o.proto, protoWG, "p", "proto")
 	strFlag(fs, &o.output, "", "o", "output")
 	fs.BoolVar(&o.noReport, "no-report", false, "")
-	boolFlag(fs, &o.pingCheck, "P", "ping")
-	fs.IntVar(&o.pingCount, "ping-count", 0, "")
+	boolFlag(fs, &o.tunPingCheck, "P", "tun-ping")
+	fs.IntVar(&o.tunPingCount, "tun-ping-count", 0, "")
 	boolFlag(fs, &o.full, "f", "full")
 	fs.StringVar(&o.node, "node", "", "")
 	fs.StringVar(&o.country, "country", "", "")
@@ -204,7 +204,7 @@ func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
 	fs.IntVar(&o.junkThreshold, "threshold", defaultJunkThreshold, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	o.proto = protoAWG
-	o.pingCheck = true
+	o.tunPingCheck = true
 }
 
 // Flags a command does not register stay at their zero value, so each step here
@@ -224,19 +224,19 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 		awgI1 = ""
 	}
 	// One invariant for everything downstream: pings is the burst length and
-	// pingCheck is "burst at all", so -ping-count alone turns ping mode on rather than
+	// tunPingCheck is "burst at all", so -tun-ping-count alone turns the measurement on rather than
 	// silently measuring nothing.
-	o.pingCount = max(o.pingCount, 0)
-	if o.pingCount > 0 {
-		o.pingCheck = true
-	} else if o.pingCheck {
-		o.pingCount = durabilityPings
+	o.tunPingCount = max(o.tunPingCount, 0)
+	if o.tunPingCount > 0 {
+		o.tunPingCheck = true
+	} else if o.tunPingCheck {
+		o.tunPingCount = durabilityPings
 	}
 	// Too short a burst hands back dead endpoints as working: measured 8 of 70
-	// "working" wg peers at -ping-count 2 (where a tail run does not even fit) and 13 at
-	// -ping-count 3, all of which -ping-count 10 proved dead.
-	if o.pingCount > 0 && o.pingCount < minDurabilityPings {
-		fmt.Fprintf(os.Stderr, "-ping-count must be at least %d: a shorter burst reports torn-down endpoints as working\n", minDurabilityPings)
+	// "working" wg peers at -tun-ping-count 2 (where a tail run does not even fit) and 13 at
+	// -tun-ping-count 3, all of which -tun-ping-count 10 proved dead.
+	if o.tunPingCount > 0 && o.tunPingCount < minDurabilityPings {
+		fmt.Fprintf(os.Stderr, "-tun-ping-count must be at least %d: a shorter burst reports torn-down endpoints as working\n", minDurabilityPings)
 		os.Exit(2)
 	}
 	if o.genJunk {

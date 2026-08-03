@@ -51,7 +51,7 @@ func TestWriteFullReport(t *testing.T) {
 			ip:       netip.MustParseAddr(ip),
 			endpoint: ip + ":2408",
 			exit:     metaResult{loc: "RU", colo: colo, coloCity: city, coloISO: "RU"},
-			latency:  time.Duration(ms) * time.Millisecond,
+			epPing:   time.Duration(ms) * time.Millisecond,
 			ok:       true,
 			durable:  true,
 		}
@@ -91,7 +91,7 @@ func TestWriteFullReport(t *testing.T) {
 
 func TestLessByLossRTT(t *testing.T) {
 	mk := func(ep string, ms int, loss float32, measured bool) endpointResult {
-		return endpointResult{endpoint: ep, rtt: time.Duration(ms) * time.Millisecond, loss: loss, measured: measured}
+		return endpointResult{endpoint: ep, tunPing: time.Duration(ms) * time.Millisecond, loss: loss, measured: measured}
 	}
 	cases := []struct {
 		name string
@@ -100,7 +100,7 @@ func TestLessByLossRTT(t *testing.T) {
 	}{
 		{"lower loss beats lower ping", mk("a", 200, 0, true), mk("b", 20, 0.2, true), true},
 		{"equal loss falls back to ping", mk("a", 20, 0.1, true), mk("b", 90, 0.1, true), true},
-		{"unmeasured ranks by host ping", endpointResult{endpoint: "a", latency: 20 * time.Millisecond}, endpointResult{endpoint: "b", latency: 90 * time.Millisecond}, true},
+		{"unmeasured ranks by host ping", endpointResult{endpoint: "a", epPing: 20 * time.Millisecond}, endpointResult{endpoint: "b", epPing: 90 * time.Millisecond}, true},
 		{"tie broken by endpoint", mk("a", 20, 0, true), mk("b", 20, 0, true), true},
 	}
 	for _, c := range cases {
@@ -155,7 +155,7 @@ func TestTeardown(t *testing.T) {
 
 func TestBestByPing(t *testing.T) {
 	mk := func(ep string, ms int) endpointResult {
-		return endpointResult{endpoint: ep, latency: time.Duration(ms) * time.Millisecond}
+		return endpointResult{endpoint: ep, epPing: time.Duration(ms) * time.Millisecond}
 	}
 
 	picks := []endpointResult{mk("a", 0), mk("b", 90), mk("c", 40)}
@@ -627,5 +627,36 @@ func TestNoEndpointMsg(t *testing.T) {
 		if got := noEndpointMsg(c.opts); got != c.want {
 			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
 		}
+	}
+}
+
+func TestReportPingColumns(t *testing.T) {
+	r := endpointResult{
+		endpoint: "1.2.3.4:2408",
+		epPing:   30 * time.Millisecond,
+		tunPing:  90 * time.Millisecond,
+		loss:     0.1,
+		measured: true,
+		ok:       true,
+		durable:  true,
+	}
+
+	var withPing bytes.Buffer
+	writeRows(&withPing, []endpointResult{r}, true)
+	for _, want := range []string{"ENDPOINT PING", "TUN PING", "LOSS", "30ms", "90ms", "10%"} {
+		if !strings.Contains(withPing.String(), want) {
+			t.Errorf("-tun-ping report is missing %q:\n%s", want, withPing.String())
+		}
+	}
+
+	var noPing bytes.Buffer
+	writeRows(&noPing, []endpointResult{r}, false)
+	for _, unwanted := range []string{"TUN PING", "LOSS", "90ms", "10%"} {
+		if strings.Contains(noPing.String(), unwanted) {
+			t.Errorf("report without -tun-ping leaks %q:\n%s", unwanted, noPing.String())
+		}
+	}
+	if !strings.Contains(noPing.String(), "30ms") {
+		t.Errorf("report without -tun-ping lost the endpoint ping:\n%s", noPing.String())
 	}
 }

@@ -51,22 +51,23 @@ type endpointResult struct {
 	ip       netip.Addr
 	endpoint string
 	exit     metaResult
-	latency  time.Duration // host ICMP ping to the bare IP (off-tunnel)
-	rtt      time.Duration // in-tunnel RTT to 1.1.1.1, valid only when measured
+	epPing   time.Duration // host ICMP ping to the bare IP, no tunnel involved
+	tunPing  time.Duration // in-tunnel RTT to pingTarget, valid only when measured
 	loss     float32       // in-tunnel packet loss 0..1, valid only when measured
-	measured bool          // rtt/loss were sampled (-ping)
+	measured bool          // tunPing/loss were sampled (-tun-ping)
 	ok       bool
 	durable  bool
 }
 
-func (r endpointResult) ping() time.Duration {
+func (r endpointResult) sortPing() time.Duration {
 	if r.measured {
-		return r.rtt
+		return r.tunPing
 	}
-	return r.latency
+	return r.epPing
 }
 
-func (r endpointResult) pingStr() string { return latencyStr(r.ping()) }
+func (r endpointResult) epPingStr() string  { return latencyStr(r.epPing) }
+func (r endpointResult) tunPingStr() string { return latencyStr(r.tunPing) }
 
 func (r endpointResult) lossStr() string {
 	if !r.measured {
@@ -75,27 +76,29 @@ func (r endpointResult) lossStr() string {
 	return fmt.Sprintf("%.0f%%", r.loss*100)
 }
 
-func lossCol(v string, ping bool) string {
+func tunFields(tunPing, loss string, ping bool) string {
 	if !ping {
 		return ""
 	}
-	return fmt.Sprintf("%-6s ", v)
+	return fmt.Sprintf("%-9s %-6s ", tunPing, loss)
 }
 
-func lossField(r endpointResult, ping bool) string { return lossCol(r.lossStr(), ping) }
+func tunFieldsOf(r endpointResult, ping bool) string {
+	return tunFields(r.tunPingStr(), r.lossStr(), ping)
+}
 
 func sortNote(ping bool) string {
 	if ping {
-		return "sorted by loss, then ping"
+		return "sorted by in-tunnel loss, then in-tunnel ping"
 	}
-	return "sorted by ping"
+	return "sorted by ping to the endpoint"
 }
 
 func bestNote(ping bool) string {
 	if ping {
-		return "lowest loss, then ping"
+		return "lowest in-tunnel loss, then in-tunnel ping"
 	}
-	return "lowest ping"
+	return "lowest ping to the endpoint"
 }
 
 func latencyStr(d time.Duration) string {
@@ -205,13 +208,13 @@ func filterSorted(results []endpointResult, keep func(endpointResult) bool) []en
 }
 
 // Loss before ping, mirroring CloudflareWarpSpeedTest. Unmeasured endpoints
-// carry loss 0, so without -ping this degrades to ping-only ordering.
+// carry loss 0, so without -tun-ping this degrades to ping-only ordering.
 func lessByLossRTT(a, b endpointResult) bool {
 	if a.loss != b.loss {
 		return a.loss < b.loss
 	}
-	if a.ping() != b.ping() {
-		return lessDur(a.ping(), b.ping())
+	if a.sortPing() != b.sortPing() {
+		return lessDur(a.sortPing(), b.sortPing())
 	}
 	return a.endpoint < b.endpoint
 }
@@ -241,13 +244,17 @@ func bestByPing(picks []endpointResult) endpointResult {
 }
 
 const (
-	reportRowFmt   = "%-22s %-8s %s%-10s %-6s %s\n"
-	nodePickRowFmt = "%-6s %-22s %-8s %s%-10s %s\n"
+	reportRowFmt   = "%-22s %-13s %s%-10s %-6s %s\n"
+	nodePickRowFmt = "%-6s %-22s %-13s %s%-10s %s\n"
 )
 
 func writeHeader(w io.Writer, working, probed int, ping bool) {
 	fmt.Fprintf(w, "# WARP endpoints: %d working / %d probed\n", working, probed)
 	fmt.Fprintf(w, "# %s\n", sortNote(ping))
+	fmt.Fprintln(w, "# ENDPOINT PING = ICMP ping to the endpoint address from this host, no tunnel involved")
+	if ping {
+		fmt.Fprintf(w, "# TUN PING / LOSS = RTT and packet loss measured inside the tunnel, to %s\n", pingTarget)
+	}
 	fmt.Fprintln(w, "# SEEN AS = region external services see through the tunnel")
 	fmt.Fprintln(w, "# NODE / NODE LOCATION = Cloudflare WARP edge node the tunnel landed on, and where it sits")
 	fmt.Fprintln(w, "# One /24 pool can land on several different nodes - NODE is per endpoint, not per subnet")
@@ -276,9 +283,9 @@ func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 }
 
 func writeRows(w io.Writer, results []endpointResult, ping bool) {
-	fmt.Fprintf(w, reportRowFmt, "ENDPOINT", "PING", lossCol("LOSS", ping), "SEEN AS", "NODE", "NODE LOCATION")
+	fmt.Fprintf(w, reportRowFmt, "ENDPOINT", "ENDPOINT PING", tunFields("TUN PING", "LOSS", ping), "SEEN AS", "NODE", "NODE LOCATION")
 	for _, r := range results {
-		fmt.Fprintf(w, reportRowFmt, r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
+		fmt.Fprintf(w, reportRowFmt, r.endpoint, r.epPingStr(), tunFieldsOf(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
 	}
 }
 
@@ -353,24 +360,25 @@ type pickRow struct {
 	latency time.Duration
 }
 
-func lossCell(r endpointResult, ping bool) []string {
+func tunCells(r endpointResult, ping bool) []string {
 	if !ping {
 		return nil
 	}
-	return []string{r.lossStr()}
+	return []string{r.tunPingStr(), r.lossStr()}
 }
 
-func lossHeader(ping bool) []string {
+func tunHeaders(ping bool) []string {
 	if !ping {
 		return nil
 	}
-	return []string{"LOSS"}
+	return []string{"TUN PING", "LOSS"}
 }
 
 func metricCols(ping bool, pingCol int) map[int]bool {
 	cols := map[int]bool{pingCol: true}
 	if ping {
 		cols[pingCol+1] = true
+		cols[pingCol+2] = true
 	}
 	return cols
 }
@@ -381,21 +389,21 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult,
 		subnet := p.String()
 		if picks := subnetEndpoints(working, p); len(picks) > 0 {
 			r := bestByPing(picks)
-			cells := append([]string{subnet, r.endpoint, r.pingStr()}, lossCell(r, ping)...)
+			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, tunCells(r, ping)...)
 			cells = append(cells, exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
-			rows = append(rows, pickRow{cells, statusOK, r.loss, r.ping()})
+			rows = append(rows, pickRow{cells, statusOK, r.loss, r.sortPing()})
 			continue
 		}
 		if picks := subnetEndpoints(flaky, p); len(picks) > 0 {
 			r := bestByPing(picks)
-			cells := append([]string{subnet, r.endpoint, r.pingStr()}, lossCell(r, ping)...)
+			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, tunCells(r, ping)...)
 			cells = append(cells, "flaky", "", "")
-			rows = append(rows, pickRow{cells, statusFlaky, r.loss, r.ping()})
+			rows = append(rows, pickRow{cells, statusFlaky, r.loss, r.sortPing()})
 			continue
 		}
 		cells := []string{subnet, "no working endpoints", ""}
 		if ping {
-			cells = append(cells, "")
+			cells = append(cells, "", "")
 		}
 		cells = append(cells, "", "", "")
 		rows = append(rows, pickRow{cells, statusNone, 0, 0})
@@ -404,7 +412,7 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult,
 		return lessLossDur(rows[i].loss, rows[i].latency, rows[j].loss, rows[j].latency)
 	})
 
-	headers := append([]string{"SUBNET", "ENDPOINT", "PING"}, lossHeader(ping)...)
+	headers := append([]string{"SUBNET", "ENDPOINT", "ENDPOINT PING"}, tunHeaders(ping)...)
 	headers = append(headers, "SEEN AS", "NODE", "NODE LOCATION")
 	accentCols := metricCols(ping, 2)
 
@@ -473,9 +481,9 @@ func writeNodePicks(w io.Writer, working []endpointResult, ping bool) {
 	sort.Slice(picks, func(i, j int) bool { return lessByLossRTT(picks[i], picks[j]) })
 
 	fmt.Fprintf(w, "\n# Best endpoint per node (%s)\n", bestNote(ping))
-	fmt.Fprintf(w, nodePickRowFmt, "NODE", "ENDPOINT", "PING", lossCol("LOSS", ping), "SEEN AS", "NODE LOCATION")
+	fmt.Fprintf(w, nodePickRowFmt, "NODE", "ENDPOINT", "ENDPOINT PING", tunFields("TUN PING", "LOSS", ping), "SEEN AS", "NODE LOCATION")
 	for _, r := range picks {
-		fmt.Fprintf(w, nodePickRowFmt, exitColo(r.exit), r.endpoint, r.pingStr(), lossField(r, ping), exitRegion(r.exit), exitColoLocation(r.exit))
+		fmt.Fprintf(w, nodePickRowFmt, exitColo(r.exit), r.endpoint, r.epPingStr(), tunFieldsOf(r, ping), exitRegion(r.exit), exitColoLocation(r.exit))
 	}
 }
 

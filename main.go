@@ -139,7 +139,7 @@ func runScanCmd(ctx context.Context, opts options) error {
 	if opts.best {
 		printBest(ph)
 	} else {
-		writeConsole(os.Stdout, ph, consoleRenderer(os.Stdout), opts.pingCheck)
+		writeConsole(os.Stdout, ph, consoleRenderer(os.Stdout), opts.tunPingCheck)
 	}
 	if opts.conf != "" {
 		writeConfFile(opts, ph)
@@ -157,7 +157,7 @@ func runScanCmd(ctx context.Context, opts options) error {
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
 	}
-	if err := writeToFile(reportPath, ph, opts.pingCheck); err != nil {
+	if err := writeToFile(reportPath, ph, opts.tunPingCheck); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", reportPath, err)))
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
@@ -234,7 +234,7 @@ func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, run
 		return runScan(ctx, opts, run, ips, timeout, plainEmit)
 	}
 
-	m := newScanModel(cancel, opts.pingCheck)
+	m := newScanModel(cancel, opts.tunPingCheck)
 	m.header = header
 	if quitHint != "" {
 		m.quitHint = quitHint
@@ -276,7 +276,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 	warpPorts = open
 
 	results := make([]endpointResult, len(ips))
-	pings := opts.pingCount
+	pings := opts.tunPingCount
 	label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
 	emit(barBeginMsg{label: label, total: len(ips)})
 	work := func(tn *tunnel, i int) {
@@ -286,12 +286,12 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		if t, endpoint, ok, rtt, loss, flaky := tn.probe(ctx, ip, timeout, pings, opts.wantMeta); ok {
 			r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
 			if pings > 0 {
-				r.rtt, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
+				r.tunPing, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
 			}
 			if hrtt, pok := pingHost(ip, timeout); pok {
-				r.latency = hrtt
+				r.epPing = hrtt
 			}
-			found := foundMsg{endpoint: endpoint, latency: r.ping(), loss: r.loss, measured: r.measured, flaky: !r.durable}
+			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, flaky: !r.durable}
 			if opts.wantMeta {
 				found.exit, found.colo = exitRegion(t), exitColo(t)
 			}

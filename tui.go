@@ -26,7 +26,8 @@ type (
 	probedMsg struct{}
 	foundMsg  struct {
 		endpoint string
-		latency  time.Duration
+		epPing   time.Duration
+		tunPing  time.Duration
 		loss     float32
 		measured bool
 		exit     string
@@ -162,13 +163,21 @@ func lessLatency(a, b foundMsg) bool {
 	if a.loss != b.loss {
 		return a.loss < b.loss
 	}
-	if (a.latency <= 0) != (b.latency <= 0) {
-		return a.latency > 0
+	pa, pb := a.sortPing(), b.sortPing()
+	if (pa <= 0) != (pb <= 0) {
+		return pa > 0
 	}
-	if a.latency != b.latency {
-		return a.latency < b.latency
+	if pa != pb {
+		return pa < pb
 	}
 	return a.endpoint < b.endpoint
+}
+
+func (m foundMsg) sortPing() time.Duration {
+	if m.measured {
+		return m.tunPing
+	}
+	return m.epPing
 }
 
 func (m foundMsg) lossStr() string {
@@ -214,29 +223,29 @@ func (m scanModel) renderFeed() string {
 		extra = len(rows) - feedMax
 		rows = rows[:feedMax]
 	}
-	lossHead := ""
+	tunHead := ""
 	if m.ping {
-		lossHead = pad("LOSS", 6) + " "
+		tunHead = pad("TUN PING", 9) + " " + pad("LOSS", 6) + " "
 	}
 	var b strings.Builder
-	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("PING", 8)+" "+lossHead+pad("SEEN AS", 10)+" NODE") + "\n")
+	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" "+pad("ENDPOINT PING", 13)+" "+tunHead+pad("SEEN AS", 10)+" NODE") + "\n")
 	for _, r := range rows {
 		ep := pad(r.endpoint, 22)
-		ping := pad(latencyStr(r.latency), 8)
-		loss := ""
+		ping := pad(latencyStr(r.epPing), 13)
+		tun := ""
 		if m.ping {
-			loss = pad(r.lossStr(), 6) + " "
+			tun = pad(latencyStr(r.tunPing), 9) + " " + pad(r.lossStr(), 6) + " "
 		}
 		if r.flaky {
-			b.WriteString(st.warn.Render(ep+" "+ping+" "+loss+"flaky") + "\n")
+			b.WriteString(st.warn.Render(ep+" "+ping+" "+tun+"flaky") + "\n")
 			continue
 		}
 		exit := r.exit + strings.Repeat(" ", max(0, 10-lipgloss.Width(r.exit)))
-		lossSeg := ""
+		tunSeg := ""
 		if m.ping {
-			lossSeg = st.accent.Render(loss)
+			tunSeg = st.accent.Render(tun)
 		}
-		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + lossSeg + exit + " " + r.colo + "\n")
+		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + tunSeg + exit + " " + r.colo + "\n")
 	}
 	if extra > 0 {
 		b.WriteString(st.dim.Render(fmt.Sprintf("… +%d more", extra)) + "\n")
