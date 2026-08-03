@@ -36,8 +36,10 @@ var commands = []command{
 		name:  "register",
 		brief: "register a WARP account and save it",
 		intro: []string{
-			"Registers a fresh WARP account and writes it to the account file,",
-			"overwriting any existing one. Every other command needs it.",
+			"Writes a WARP account to the account file - every other command needs it.",
+			"When the file already holds an account, its id and token are reused to",
+			"rotate the keys instead of burning a new registration; -fresh forces a",
+			"brand-new account.",
 			"",
 			"Falls back to registering through a WARP tunnel when the Cloudflare API",
 			"is unreachable directly, trying AmneziaWG then WireGuard; -proxy skips",

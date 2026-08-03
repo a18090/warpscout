@@ -66,7 +66,12 @@ func runRegisterCmd(ctx context.Context, opts options) error {
 	}
 	timeout := time.Duration(opts.timeoutSec) * time.Second
 
-	a, err := obtainAccount(ctx, opts, true, ips, timeout)
+	var existing account
+	if !opts.freshAccount {
+		existing, _ = loadAccount(opts.accountPath)
+	}
+
+	a, err := obtainAccount(ctx, opts, true, ips, timeout, existing)
 	if err != nil {
 		if opts.proxy == "" {
 			return fmt.Errorf("registration failed: %v\ncould not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>", err)
@@ -76,7 +81,11 @@ func runRegisterCmd(ctx context.Context, opts options) error {
 	if err := saveAccount(opts.accountPath, a); err != nil {
 		return fmt.Errorf("could not save account to %s: %v", opts.accountPath, err)
 	}
-	fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("Registered fresh WARP account -> %s", opts.accountPath)))
+	what := "Registered fresh WARP account"
+	if a.ID == existing.ID {
+		what = "Rotated the keys of the existing WARP account"
+	}
+	fmt.Fprintln(os.Stderr, errPal.ok(fmt.Sprintf("%s -> %s", what, opts.accountPath)))
 	return nil
 }
 

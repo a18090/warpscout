@@ -35,10 +35,10 @@ const (
 )
 
 type account struct {
-	PrivateKey    string `json:"private_key"`
-	PeerPublicKey string `json:"peer_public_key"`
 	ID            string `json:"id"`
 	Token         string `json:"token"`
+	PrivateKey    string `json:"private_key"`
+	PeerPublicKey string `json:"peer_public_key"`
 }
 
 func generateKeypair() (privB64, pubB64 string, err error) {
@@ -135,6 +135,41 @@ func registerWARP(ctx context.Context, client *http.Client) (account, error) {
 		return account{}, fmt.Errorf("PATCH /reg/%s: %w", a.ID, err)
 	}
 	return a, nil
+}
+
+func rotateKey(ctx context.Context, client *http.Client, existing account) (account, error) {
+	priv, pub, err := generateKeypair()
+	if err != nil {
+		return account{}, err
+	}
+	body, err := doJSON(ctx, client, http.MethodPatch,
+		fmt.Sprintf("%s/%s", regBaseURL, existing.ID), existing.Token,
+		map[string]string{"key": pub})
+	if err != nil {
+		return account{}, fmt.Errorf("PATCH /reg/%s: %w", existing.ID, err)
+	}
+	return rotatedAccount(body, priv, existing)
+}
+
+func rotatedAccount(body []byte, priv string, existing account) (account, error) {
+	a, err := parseRegResp(body, priv)
+	if err != nil {
+		return account{}, err
+	}
+	a.ID, a.Token = existing.ID, existing.Token
+	return a, nil
+}
+
+func mintAccount(ctx context.Context, client *http.Client, existing account) (account, error) {
+	if existing.ID == "" || existing.Token == "" {
+		return registerWARP(ctx, client)
+	}
+	a, err := rotateKey(ctx, client, existing)
+	if err == nil {
+		return a, nil
+	}
+	fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("key rotation failed (%v) - registering a fresh account", err)))
+	return registerWARP(ctx, client)
 }
 
 func doJSON(ctx context.Context, client *http.Client, method, urlStr, token string, payload any) ([]byte, error) {
@@ -253,19 +288,19 @@ const tunnelDiscoverySample = 64
 
 const tunnelDiscoveryBudget = 40 * time.Second
 
-func obtainAccount(ctx context.Context, o options, awg bool, ips []netip.Addr, timeout time.Duration) (account, error) {
+func obtainAccount(ctx context.Context, o options, awg bool, ips []netip.Addr, timeout time.Duration, existing account) (account, error) {
 	if o.proxy != "" {
 		c, err := proxyClient(o.proxy)
 		if err != nil {
 			return account{}, err
 		}
-		return registerWARP(ctx, c)
+		return mintAccount(ctx, c, existing)
 	}
 
 	fmt.Fprintln(os.Stderr, errPal.dim("Checking Cloudflare API availability..."))
 	direct := &http.Client{Timeout: registerTimeout, Transport: regTransport(nil)}
 	if apiReachable(direct) {
-		return registerWARP(ctx, direct)
+		return mintAccount(ctx, direct, existing)
 	}
 
 	fmt.Fprintf(os.Stderr, "\n%s\n\n", errPal.fail("API unreachable directly"))
@@ -283,7 +318,7 @@ func obtainAccount(ctx context.Context, o options, awg bool, ips []netip.Addr, t
 				label += fmt.Sprintf(" (%s)", i1NoteFor(c.chain, c.label))
 			}
 			onProbe := discoveryProgress(label, len(sampled), usePlainOutput(o))
-			a, err := registerViaTunnel(ctx, p, sampled, timeout, onProbe)
+			a, err := registerViaTunnel(ctx, p, sampled, timeout, onProbe, existing)
 			if onProbe != nil {
 				fmt.Fprintln(os.Stderr)
 			}
@@ -342,7 +377,7 @@ func discoveryProgress(what string, total int, plain bool) func(probed int) {
 
 // The handshake is the only reachability test that survives the DPI which
 // forced the tunnel fallback in the first place.
-func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, onProbe func(probed int)) (account, error) {
+func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, onProbe func(probed int), existing account) (account, error) {
 	tn, err := newTunnel(awg)
 	if err != nil {
 		return account{}, err
@@ -365,7 +400,7 @@ func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout 
 		if err != nil {
 			return account{}, err
 		}
-		return registerWARP(ctx, client)
+		return mintAccount(ctx, client, existing)
 	}
 	return account{}, fmt.Errorf("no reachable endpoint")
 }

@@ -388,6 +388,21 @@ func TestParseRegResp(t *testing.T) {
 	}
 }
 
+func TestRotatedAccount(t *testing.T) {
+	body := []byte(`{"id":"dev123","config":{"peers":[{"public_key":"NEWPEER"}]}}`)
+	existing := account{PrivateKey: "OLDPRIV", PeerPublicKey: "OLDPEER", ID: "dev123", Token: "tok456"}
+	a, err := rotatedAccount(body, "NEWPRIV", existing)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.ID != "dev123" || a.Token != "tok456" {
+		t.Errorf("id/token = %q/%q, want dev123/tok456", a.ID, a.Token)
+	}
+	if a.PrivateKey != "NEWPRIV" || a.PeerPublicKey != "NEWPEER" {
+		t.Errorf("account = %+v", a)
+	}
+}
+
 func TestExpandPools(t *testing.T) {
 	if n := len(expandPools(0)); n != len(pools)*256 {
 		t.Errorf("full scan = %d IPs, want %d", n, len(pools)*256)
