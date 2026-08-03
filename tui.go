@@ -32,7 +32,7 @@ type (
 		measured bool
 		exit     string
 		colo     string
-		flaky    bool
+		torn     bool
 	}
 	barEndMsg struct{ label, summary string }
 	doneMsg   struct{}
@@ -236,8 +236,8 @@ func (m scanModel) renderFeed() string {
 		if m.ping {
 			tun = pad(latencyStr(r.tunPing), 9) + " " + pad(r.lossStr(), 6) + " "
 		}
-		if r.flaky {
-			b.WriteString(st.warn.Render(ep+" "+ping+" "+tun+"flaky") + "\n")
+		if r.torn {
+			b.WriteString(st.warn.Render(ep+" "+ping+" "+tun+"torn down") + "\n")
 			continue
 		}
 		exit := r.exit + strings.Repeat(" ", max(0, 10-lipgloss.Width(r.exit)))

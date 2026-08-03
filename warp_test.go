@@ -140,7 +140,7 @@ func TestTeardown(t *testing.T) {
 		want    bool
 	}{
 		{"all ok", []bool{true, true, true, true, true}, false},
-		{"sporadic single drop is loss, not flaky", []bool{true, false, true, true, true}, false},
+		{"sporadic single drop is loss, not torn", []bool{true, false, true, true, true}, false},
 		{"two mid drops recover", []bool{true, false, false, true, true}, false},
 		{"tail teardown (DPI)", []bool{true, true, true, false, false, false}, true},
 		{"trips early, never recovers", []bool{true, false, false, false, false}, true},
@@ -658,5 +658,18 @@ func TestReportPingColumns(t *testing.T) {
 	}
 	if !strings.Contains(noPing.String(), "30ms") {
 		t.Errorf("report without -tun-ping lost the endpoint ping:\n%s", noPing.String())
+	}
+}
+
+func TestTornDownReportBlock(t *testing.T) {
+	torn := endpointResult{endpoint: "1.2.3.4:2408", epPing: 30 * time.Millisecond, measured: true, ok: true}
+	var buf bytes.Buffer
+	writeFullReport(&buf, []endpointResult{torn}, true)
+	out := buf.String()
+	if !strings.Contains(out, "1 torn down") || !strings.Contains(out, "1.2.3.4:2408") {
+		t.Errorf("torn-down endpoint is not reported as such:\n%s", out)
+	}
+	if strings.Contains(out, "# Best endpoint per node") {
+		t.Errorf("a torn-down endpoint must not be picked as best:\n%s", out)
 	}
 }

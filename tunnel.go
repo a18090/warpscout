@@ -64,11 +64,11 @@ func newTunnel(awg bool) (*tunnel, error) {
 
 func (t *tunnel) Close() { t.dev.Close() }
 
-func (t *tunnel) probe(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, endpoint string, ok bool, rtt time.Duration, loss float32, flaky bool) {
+func (t *tunnel) probe(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, endpoint string, ok bool, rtt time.Duration, loss float32, torn bool) {
 	for _, port := range warpPorts {
 		endpoint = net.JoinHostPort(ip.String(), strconv.Itoa(port))
-		if tr, rtt, loss, flaky, ok = t.probeEndpoint(ctx, endpoint, timeout, pings, wantMeta); ok {
-			return tr, endpoint, true, rtt, loss, flaky
+		if tr, rtt, loss, torn, ok = t.probeEndpoint(ctx, endpoint, timeout, pings, wantMeta); ok {
+			return tr, endpoint, true, rtt, loss, torn
 		}
 	}
 	return metaResult{}, endpoint, false, 0, 0, false
@@ -94,7 +94,7 @@ func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Du
 	return waitHandshake(ctx, t.dev, timeout)
 }
 
-func (t *tunnel) probeEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, rtt time.Duration, loss float32, flaky, ok bool) {
+func (t *tunnel) probeEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, rtt time.Duration, loss float32, torn, ok bool) {
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
 		return metaResult{}, 0, 0, false, false
@@ -115,8 +115,8 @@ func (t *tunnel) probeEndpoint(ctx context.Context, endpoint string, timeout tim
 		if pings <= 0 {
 			return metaResult{}, 0, 0, false, true
 		}
-		rtt, loss, flaky = t.durability(pings, timeout)
-		return metaResult{}, rtt, loss, flaky, true
+		rtt, loss, torn = t.durability(pings, timeout)
+		return metaResult{}, rtt, loss, torn, true
 	}
 
 	body, ok := t.fetch(ctx, timeout)
@@ -126,8 +126,8 @@ func (t *tunnel) probeEndpoint(ctx context.Context, endpoint string, timeout tim
 	if pings <= 0 {
 		return parseMeta(body), 0, 0, false, true
 	}
-	rtt, loss, flaky = t.durability(pings, timeout)
-	return parseMeta(body), rtt, loss, flaky, true
+	rtt, loss, torn = t.durability(pings, timeout)
+	return parseMeta(body), rtt, loss, torn, true
 }
 
 // A real DPI teardown stays dead across both bursts; transient loss does not,
@@ -182,11 +182,11 @@ const (
 	pingTarget      = "1.1.1.1"
 	pingInterval    = 200 * time.Millisecond
 	durabilityPings = 10
-	// flaky = the tunnel is torn down mid-stream and never recovers, i.e. a trailing
-	// run of dropped pings. Sporadic single drops are packet loss, not flaky, so we
+	// torn down = the tunnel passes data and is then cut mid-stream, never recovering,
+	// i.e. a trailing run of dropped pings. Sporadic single drops are loss, not a teardown, so we
 	// key off a run of consecutive tail failures rather than a loss percentage.
-	flakyTailFails = 3
-	// A burst of flakyTailFails echoes technically fits a tail run, but with no
+	tornTailFails = 3
+	// A burst of tornTailFails echoes technically fits a tail run, but with no
 	// margin at all for a single stray drop:
 	// measured 13 of 70 dead wg peers reported as working at 3 echoes, none at 10.
 	minDurabilityPings = 5
@@ -277,13 +277,13 @@ func lossFraction(got, count int) float32 {
 	return float32(count-got) / float32(count)
 }
 
-// A trailing run of at least flakyTailFails unanswered echoes means the tunnel
+// A trailing run of at least tornTailFails unanswered echoes means the tunnel
 // stopped passing traffic and did not come back.
 func teardown(results []bool) bool {
-	if len(results) < flakyTailFails {
+	if len(results) < tornTailFails {
 		return false
 	}
-	for _, ok := range results[len(results)-flakyTailFails:] {
+	for _, ok := range results[len(results)-tornTailFails:] {
 		if ok {
 			return false
 		}

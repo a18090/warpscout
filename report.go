@@ -43,7 +43,7 @@ const projectURL = "https://github.com/vernette/warpscout"
 
 const (
 	statusOK = iota
-	statusFlaky
+	statusTorn
 	statusNone
 )
 
@@ -111,8 +111,8 @@ func latencyStr(d time.Duration) string {
 	return fmt.Sprintf("%dms", d.Milliseconds())
 }
 
-func (r endpointResult) working() bool { return r.ok && r.durable }
-func (r endpointResult) flaky() bool   { return r.ok && !r.durable }
+func (r endpointResult) working() bool  { return r.ok && r.durable }
+func (r endpointResult) tornDown() bool { return r.ok && !r.durable }
 
 func noFlag(string) string { return "" }
 
@@ -192,8 +192,8 @@ func workingSorted(results []endpointResult) []endpointResult {
 	return filterSorted(results, endpointResult.working)
 }
 
-func flakySorted(results []endpointResult) []endpointResult {
-	return filterSorted(results, endpointResult.flaky)
+func tornSorted(results []endpointResult) []endpointResult {
+	return filterSorted(results, endpointResult.tornDown)
 }
 
 func filterSorted(results []endpointResult, keep func(endpointResult) bool) []endpointResult {
@@ -262,9 +262,9 @@ func writeHeader(w io.Writer, working, probed int, ping bool) {
 
 func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 	working := workingSorted(results)
-	flaky := flakySorted(results)
+	torn := tornSorted(results)
 	writeHeader(w, len(working), len(results), ping)
-	if len(working) == 0 && len(flaky) == 0 {
+	if len(working) == 0 && len(torn) == 0 {
 		fmt.Fprintln(w, "\nNo working endpoints found.")
 		return
 	}
@@ -273,9 +273,9 @@ func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 		fmt.Fprintln(w)
 		writeRows(w, working, ping)
 	}
-	if len(flaky) > 0 {
-		fmt.Fprintf(w, "\n# %d flaky (handshake ok, dropped on re-probe)\n", len(flaky))
-		writeRows(w, flaky, ping)
+	if len(torn) > 0 {
+		fmt.Fprintf(w, "\n# %d torn down (handshake ok, data flowed, then cut and never recovered)\n", len(torn))
+		writeRows(w, torn, ping)
 	}
 	if len(working) > 0 {
 		writeNodePicks(w, working, ping)
@@ -303,11 +303,11 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 	st := newConStyles(r)
 	results := ph.results
 	working := workingSorted(results)
-	flaky := flakySorted(results)
+	torn := tornSorted(results)
 	fmt.Fprintln(w)
 	if len(working) == 0 {
 		fmt.Fprintln(w, st.fail.Render("No working endpoints found."))
-		writeFlakyNote(w, st, len(flaky))
+		writeTornNote(w, st, len(torn))
 		return
 	}
 
@@ -318,8 +318,8 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 	fmt.Fprintf(w, "Nodes:    %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, noFlag)))
 	fmt.Fprintf(w, "Seen as:  %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
 	fmt.Fprintf(w, "Working:  %s\n", st.ok.Render(strconv.Itoa(len(working)))+st.dim.Render(" / ")+strconv.Itoa(len(results))+" probed")
-	writeFlakyNote(w, st, len(flaky))
-	writePicksTable(w, st, working, flaky, ping)
+	writeTornNote(w, st, len(torn))
+	writePicksTable(w, st, working, torn, ping)
 }
 
 func writeJunkNote(w io.Writer, st conStyles, awg bool) {
@@ -331,11 +331,12 @@ func writeJunkNote(w io.Writer, st conStyles, awg bool) {
 		st.dim.Render("("+i1Note()+")"))
 }
 
-func writeFlakyNote(w io.Writer, st conStyles, n int) {
+func writeTornNote(w io.Writer, st conStyles, n int) {
 	if n == 0 {
 		return
 	}
-	fmt.Fprintf(w, "Flaky:    %s\n", st.warn.Render(fmt.Sprintf("%d (handshake ok, dropped on re-probe)", n)))
+	// "Torn down:" is already 10 wide, the column the other labels pad to.
+	fmt.Fprintf(w, "%-10s%s\n", "Torn down:", st.warn.Render(fmt.Sprintf("%d (handshake ok, then cut mid-stream)", n)))
 }
 
 func banner(st conStyles) string {
@@ -383,7 +384,7 @@ func metricCols(ping bool, pingCol int) map[int]bool {
 	return cols
 }
 
-func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult, ping bool) {
+func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, ping bool) {
 	var rows []pickRow
 	for _, p := range pools {
 		subnet := p.String()
@@ -394,11 +395,11 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult,
 			rows = append(rows, pickRow{cells, statusOK, r.loss, r.sortPing()})
 			continue
 		}
-		if picks := subnetEndpoints(flaky, p); len(picks) > 0 {
+		if picks := subnetEndpoints(torn, p); len(picks) > 0 {
 			r := bestByPing(picks)
 			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, tunCells(r, ping)...)
-			cells = append(cells, "flaky", "", "")
-			rows = append(rows, pickRow{cells, statusFlaky, r.loss, r.sortPing()})
+			cells = append(cells, "torn down", "", "")
+			rows = append(rows, pickRow{cells, statusTorn, r.loss, r.sortPing()})
 			continue
 		}
 		cells := []string{subnet, "no working endpoints", ""}
@@ -426,7 +427,7 @@ func writePicksTable(w io.Writer, st conStyles, working, flaky []endpointResult,
 				return st.cell.Bold(true)
 			}
 			switch rows[row].status {
-			case statusFlaky:
+			case statusTorn:
 				return st.cell.Foreground(warnColor)
 			case statusNone:
 				if col == 1 {

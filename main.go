@@ -194,7 +194,7 @@ func noEndpointMsg(opts options) string {
 	return "no working endpoints found"
 }
 
-const noWorkingMsg = "every matching endpoint is flaky"
+const noWorkingMsg = "every matching endpoint was torn down mid-stream"
 
 func writeConfFile(opts options, ph phaseResult) {
 	best, ok := bestOverall(ph)
@@ -283,15 +283,15 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		defer emit(probedMsg{})
 		ip := ips[i]
 		r := endpointResult{ip: ip}
-		if t, endpoint, ok, rtt, loss, flaky := tn.probe(ctx, ip, timeout, pings, opts.wantMeta); ok {
+		if t, endpoint, ok, rtt, loss, torn := tn.probe(ctx, ip, timeout, pings, opts.wantMeta); ok {
 			r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
 			if pings > 0 {
-				r.tunPing, r.loss, r.measured, r.durable = rtt, loss, true, !flaky
+				r.tunPing, r.loss, r.measured, r.durable = rtt, loss, true, !torn
 			}
 			if hrtt, pok := pingHost(ip, timeout); pok {
 				r.epPing = hrtt
 			}
-			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, flaky: !r.durable}
+			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, torn: !r.durable}
 			if opts.wantMeta {
 				found.exit, found.colo = exitRegion(t), exitColo(t)
 			}
