@@ -213,11 +213,14 @@ func TestRenderConf(t *testing.T) {
 	if strings.Contains(awg, "Table") {
 		t.Errorf("Table must be absent without -table-off:\n%s", awg)
 	}
+	if strings.Contains(awg, "MTU") {
+		t.Errorf("MTU must be absent without -mtu:\n%s", awg)
+	}
 	if strings.Contains(awg, "0.0.0.0") || strings.Contains(awg, warpAddress) {
 		t.Errorf("IPv6 config must not carry IPv4:\n%s", awg)
 	}
 
-	wg := renderConf(options{tableOff: true}, "188.114.98.5:2408", false)
+	wg := renderConf(options{tableOff: true, mtu: 1420}, "188.114.98.5:2408", false)
 	for _, unwanted := range []string{"Jc = ", "Jmin = ", "Jmax = ", "I1 = ", "::"} {
 		if strings.Contains(wg, unwanted) {
 			t.Errorf("plain WireGuard config must not contain %q:\n%s", unwanted, wg)
@@ -225,6 +228,9 @@ func TestRenderConf(t *testing.T) {
 	}
 	if !strings.Contains(wg, "Table = off") {
 		t.Errorf("-table-off not reflected:\n%s", wg)
+	}
+	if !strings.Contains(wg, "MTU = 1420") {
+		t.Errorf("-mtu not reflected:\n%s", wg)
 	}
 }
 

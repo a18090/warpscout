@@ -16,7 +16,9 @@ func renderConf(o options, endpoint string, awg bool) string {
 		fmt.Fprintf(&b, "Address = %s/32\n", warpAddress)
 	}
 	fmt.Fprintf(&b, "PrivateKey = %s\n", warpPrivateKey)
-	fmt.Fprintf(&b, "MTU = %d\n", tunnelMTU)
+	if o.mtu > 0 {
+		fmt.Fprintf(&b, "MTU = %d\n", o.mtu)
+	}
 	if o.tableOff {
 		fmt.Fprintf(&b, "Table = off\n")
 	}

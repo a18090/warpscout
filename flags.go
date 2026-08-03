@@ -17,6 +17,7 @@ type options struct {
 	perSubnet      int
 	pingCount      int
 	junkThreshold  int
+	mtu            int
 	proto          string
 	output         string
 	conf           string
@@ -92,6 +93,7 @@ var (
 		{"", "no-report", "", "skip the report file entirely (overrides -o)"},
 		{"", "conf", "FILE", "write a ready-to-import wg/awg config for the best endpoint"},
 		{"", "table-off", "", "add \"Table = off\" to the generated config: bring the interface up without touching routes"},
+		{"", "mtu", "N", "set MTU in the generated config (default: leave the line out)"},
 		{"", "node", "COLO", "keep only endpoints landing on these edge nodes: comma-separated IATA codes"},
 		{"", "country", "ISO", "keep only endpoints whose edge node sits in these countries: comma-separated ISO codes"},
 		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
@@ -174,6 +176,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.BoolVar(&o.best, "best", false, "")
 	fs.StringVar(&o.conf, "conf", "", "")
 	fs.BoolVar(&o.tableOff, "table-off", false, "")
+	fs.IntVar(&o.mtu, "mtu", 0, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	fs.BoolVar(&o.emoji, "emoji", false, "")
 	o.wantMeta = true
@@ -242,6 +245,7 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	}
 	applyGenI1(fs, o)
 	validateJunkParams()
+	validateMTU(*o)
 	applyTarget(o)
 	applyNode(o)
 }
@@ -341,6 +345,16 @@ func validateJunkParams() {
 	}
 	if awgJmax > tunnelMTU {
 		fail("-jmax (%d) must be <= %d", awgJmax, tunnelMTU)
+	}
+}
+
+func validateMTU(o options) {
+	if o.mtu == 0 {
+		return
+	}
+	if o.mtu < mtuMin || o.mtu > mtuMax {
+		fmt.Fprintf(os.Stderr, "-mtu (%d) must be between %d and %d\n", o.mtu, mtuMin, mtuMax)
+		os.Exit(2)
 	}
 }
 

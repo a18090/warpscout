@@ -29,6 +29,9 @@ const warpAddressV6 = "2606:4700:110:8d87:b0ba:4148:5a61:4873"
 const (
 	tunnelMTU = 1280
 	keepalive = 25
+
+	mtuMin = 576
+	mtuMax = 1500
 )
 
 // -jc/-jmin/-jmax/-i1 override these in place (flags.go), so var not const.
