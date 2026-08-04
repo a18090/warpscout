@@ -40,11 +40,15 @@ func newIPStack(local []netip.Addr) (tun.Device, *ipStack, error) {
 type tunnel interface {
 	handshake(ctx context.Context, endpoint string, timeout time.Duration) bool
 	ports() []int
+	attempts() int
 	stack() *ipStack
 	Close()
 }
 
 func newTunnel(run protoRun) (tunnel, error) {
+	if run.isMASQUE() {
+		return newMasqueTunnel()
+	}
 	return newWGTunnel(run.isAWG())
 }
 
@@ -82,6 +86,7 @@ func newWGTunnel(awg bool) (*wgTunnel, error) {
 
 func (t *wgTunnel) Close()          { t.dev.Close() }
 func (t *wgTunnel) ports() []int    { return warpPorts }
+func (t *wgTunnel) attempts() int   { return 1 }
 func (t *wgTunnel) stack() *ipStack { return t.ipStack }
 
 func (t *wgTunnel) handshake(ctx context.Context, endpoint string, timeout time.Duration) bool {
@@ -95,11 +100,42 @@ func (t *wgTunnel) handshake(ctx context.Context, endpoint string, timeout time.
 	return waitHandshake(ctx, t.dev, timeout)
 }
 
-func tunnelProbe(ctx context.Context, t tunnel, ip netip.Addr, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, endpoint string, ok bool, rtt time.Duration, loss float32, torn bool) {
-	for _, port := range t.ports() {
-		endpoint = net.JoinHostPort(ip.String(), strconv.Itoa(port))
-		if tr, rtt, loss, torn, ok = probeEndpoint(ctx, t, endpoint, timeout, pings, wantMeta); ok {
-			return tr, endpoint, true, rtt, loss, torn
+type probeTarget struct {
+	ip   netip.Addr
+	port int // 0 means "try the tunnel's whole port list"
+}
+
+func probeTargets(run protoRun, ips []netip.Addr, ports []int) []probeTarget {
+	if !run.isMASQUE() {
+		targets := make([]probeTarget, len(ips))
+		for i, ip := range ips {
+			targets[i] = probeTarget{ip: ip}
+		}
+		return targets
+	}
+	targets := make([]probeTarget, 0, len(ips)*len(ports))
+	for _, ip := range ips {
+		for _, port := range ports {
+			targets = append(targets, probeTarget{ip: ip, port: port})
+		}
+	}
+	return targets
+}
+
+func tunnelProbe(ctx context.Context, t tunnel, target probeTarget, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, endpoint string, ok bool, rtt time.Duration, loss float32, torn bool) {
+	ports := t.ports()
+	if target.port != 0 {
+		ports = []int{target.port}
+	}
+	for _, port := range ports {
+		endpoint = net.JoinHostPort(target.ip.String(), strconv.Itoa(port))
+		for attempt := 0; attempt < max(t.attempts(), 1); attempt++ {
+			if ctx.Err() != nil {
+				return metaResult{}, endpoint, false, 0, 0, false
+			}
+			if tr, rtt, loss, torn, ok = probeEndpoint(ctx, t, endpoint, timeout, pings, wantMeta); ok {
+				return tr, endpoint, true, rtt, loss, torn
+			}
 		}
 	}
 	return metaResult{}, endpoint, false, 0, 0, false

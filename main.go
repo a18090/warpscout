@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/netip"
 	"os"
 	"strings"
@@ -19,9 +20,7 @@ func setupScan(opts options) (protoRun, []netip.Addr, error) {
 		return run, nil, err
 	}
 
-	if opts.ipv6 {
-		pools = poolsV6
-	}
+	pools = poolsFor(run, opts.ipv6)
 	if len(opts.targets) > 0 {
 		pools = opts.targets
 	}
@@ -111,6 +110,10 @@ func runScanCmd(ctx context.Context, opts options) error {
 	if err != nil {
 		return err
 	}
+	if run.isMASQUE() && masqueAcct == nil {
+		return fmt.Errorf("%s holds no MASQUE device: run \"warpscout register\" again", opts.accountPath)
+	}
+
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ph, err := runScanUI(ctx, cancel, opts, run, ips, time.Duration(opts.timeoutSec)*time.Second, "", "")
@@ -184,6 +187,9 @@ func noEndpointMsg(opts options) string {
 	if len(filters) > 0 {
 		return "no endpoint landed on " + strings.Join(filters, " and ")
 	}
+	if opts.proto == protoMASQUE {
+		return "no MASQUE endpoint passed data - this network blocks it, try -p awg"
+	}
 	if opts.genI1 == "" {
 		if opts.proto == protoAWG {
 			return "no working endpoints found - try -gen-i1 quic"
@@ -206,6 +212,12 @@ func writeConfFile(opts options, ph phaseResult) {
 		return
 	}
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))
+	if ph.run.isMASQUE() {
+		if _, port, err := net.SplitHostPort(best.endpoint); err == nil {
+			fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf(
+				"  run it with: usque socks -c %s -P %s -s %s", opts.conf, port, masqueSNI)))
+		}
+	}
 }
 
 func bestOverall(ph phaseResult) (endpointResult, bool) {
@@ -264,26 +276,29 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 	if scanSourceIP.IsValid() {
 		emit(stepMsg{done: true, label: "Interface", summary: fmt.Sprintf("%s (%s)", opts.iface, scanSourceIP)})
 	}
-	open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, emit)
-	if err != nil {
-		emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
-		return phaseResult{}, err
+	if !run.isMASQUE() {
+		open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, emit)
+		if err != nil {
+			emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
+			return phaseResult{}, err
+		}
+		if len(open) == 0 {
+			emit(stepMsg{fail: true, summary: "no WARP port is reachable on this network"})
+			return phaseResult{}, fmt.Errorf("no reachable WARP port")
+		}
+		warpPorts = open
 	}
-	if len(open) == 0 {
-		emit(stepMsg{fail: true, summary: "no WARP port is reachable on this network"})
-		return phaseResult{}, fmt.Errorf("no reachable WARP port")
-	}
-	warpPorts = open
 
-	results := make([]endpointResult, len(ips))
+	targets := probeTargets(run, ips, masqueEndpointPorts)
+	results := make([]endpointResult, len(targets))
 	pings := opts.tunPingCount
 	label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
-	emit(barBeginMsg{label: label, total: len(ips)})
+	emit(barBeginMsg{label: label, total: len(targets)})
 	work := func(tn tunnel, i int) {
 		defer emit(probedMsg{})
-		ip := ips[i]
+		ip := targets[i].ip
 		r := endpointResult{ip: ip}
-		if t, endpoint, ok, rtt, loss, torn := tunnelProbe(ctx, tn, ip, timeout, pings, opts.wantMeta); ok {
+		if t, endpoint, ok, rtt, loss, torn := tunnelProbe(ctx, tn, targets[i], timeout, pings, opts.wantMeta); ok {
 			r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
 			if pings > 0 {
 				r.tunPing, r.loss, r.measured, r.durable = rtt, loss, true, !torn
@@ -299,7 +314,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		}
 		results[i] = r
 	}
-	if err := runTunnelPool(opts.tunnelParallel, run, len(ips), work); err != nil {
+	if err := runTunnelPool(opts.tunnelParallel, run, len(targets), work); err != nil {
 		emit(stepMsg{fail: true, summary: err.Error()})
 		return phaseResult{}, err
 	}

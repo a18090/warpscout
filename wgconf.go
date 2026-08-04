@@ -50,5 +50,12 @@ func allowedIPs(ipv6 bool) string {
 }
 
 func writeConf(o options, endpoint string, run protoRun) error {
+	if run.isMASQUE() {
+		conf, err := renderMasqueConf(endpoint)
+		if err != nil {
+			return err
+		}
+		return os.WriteFile(o.conf, conf, 0600)
+	}
 	return os.WriteFile(o.conf, []byte(renderConf(o, endpoint, run)), 0600)
 }

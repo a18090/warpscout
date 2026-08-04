@@ -75,8 +75,13 @@ var (
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 	}, netSpecs...)}
 
+	masqueGroup = flagGroup{"MASQUE", []flagSpec{
+		{"", "masque-sni", "HOST", "SNI to present to the MASQUE endpoint; a different name often gets through DPI"},
+		{"", "masque-attempts", "N", "how many times to re-check a failing MASQUE endpoint before calling it dead"},
+	}}
+
 	protoGroup = flagGroup{"Protocol", []flagSpec{
-		{"p", "proto", "wg|awg", "tunnel protocol: wg (WireGuard) or awg (AmneziaWG)"},
+		{"p", "proto", "wg|awg|masque", "tunnel protocol: wg (WireGuard), awg (AmneziaWG) or masque (QUIC)"},
 	}}
 
 	awgGroup = flagGroup{"AmneziaWG obfuscation parameters", []flagSpec{
@@ -177,6 +182,8 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.StringVar(&o.country, "country", "", "")
 	fs.BoolVar(&o.best, "best", false, "")
 	fs.StringVar(&o.conf, "conf", "", "")
+	fs.StringVar(&masqueSNI, "masque-sni", masqueDefaultSNI, "")
+	fs.IntVar(&masqueAttempts, "masque-attempts", masqueDefaultAttempts, "")
 	fs.BoolVar(&o.tableOff, "table-off", false, "")
 	fs.IntVar(&o.mtu, "mtu", 0, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
@@ -240,7 +247,7 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 		os.Exit(2)
 	}
 	if o.genJunk {
-		if o.proto == protoWG {
+		if o.proto != protoAWG {
 			fmt.Fprintln(os.Stderr, "-gen-junk needs AmneziaWG: use -proto awg")
 			os.Exit(2)
 		}
@@ -251,6 +258,8 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	validateMTU(*o)
 	applyTarget(o)
 	applyNode(o)
+	rejectMasqueFilters(*o)
+	validateMasqueAttempts()
 }
 
 func applyTarget(o *options) {
@@ -299,7 +308,7 @@ func applyGenI1(fs *flag.FlagSet, o *options) {
 		}
 		return
 	}
-	if o.proto == protoWG {
+	if o.proto != protoAWG {
 		fmt.Fprintln(os.Stderr, "-gen-i1 needs AmneziaWG: use -proto awg")
 		os.Exit(2)
 	}
@@ -434,4 +443,26 @@ func defaultNote(st conStyles, fs *flag.FlagSet, long string) string {
 		return ""
 	}
 	return st.dim.Render(fmt.Sprintf(" (default %s)", f.DefValue))
+}
+
+func rejectMasqueFilters(o options) {
+	if o.proto != protoMASQUE {
+		return
+	}
+	for _, f := range []struct {
+		name string
+		set  bool
+	}{{"-node", len(o.colos) > 0}, {"-country", len(o.countries) > 0}} {
+		if f.set {
+			fmt.Fprintf(os.Stderr, "%s does not apply to -proto masque: every MASQUE endpoint exits through the same node\n", f.name)
+			os.Exit(2)
+		}
+	}
+}
+
+func validateMasqueAttempts() {
+	if masqueAttempts < 1 {
+		fmt.Fprintln(os.Stderr, "-masque-attempts must be at least 1")
+		os.Exit(2)
+	}
 }

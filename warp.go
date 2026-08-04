@@ -134,6 +134,7 @@ type protoKind int
 const (
 	kindWG protoKind = iota
 	kindAWG
+	kindMASQUE
 )
 
 type protoRun struct {
@@ -142,15 +143,18 @@ type protoRun struct {
 }
 
 const (
-	protoWG  = "wg"
-	protoAWG = "awg"
+	protoWG     = "wg"
+	protoAWG    = "awg"
+	protoMASQUE = "masque"
 )
 
-func (r protoRun) isAWG() bool { return r.kind == kindAWG }
+func (r protoRun) isAWG() bool    { return r.kind == kindAWG }
+func (r protoRun) isMASQUE() bool { return r.kind == kindMASQUE }
 
 var protoRuns = []protoRun{
 	{kindWG, protoWG},
 	{kindAWG, protoAWG},
+	{kindMASQUE, protoMASQUE},
 }
 
 func parseProto(p string) (protoRun, error) {
@@ -159,5 +163,5 @@ func parseProto(p string) (protoRun, error) {
 			return r, nil
 		}
 	}
-	return protoRun{}, fmt.Errorf("invalid -proto %q: use wg or awg", p)
+	return protoRun{}, fmt.Errorf("invalid -proto %q: use wg, awg or masque", p)
 }

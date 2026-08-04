@@ -3,7 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"net/netip"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -313,14 +315,145 @@ func TestJunkCommand(t *testing.T) {
 }
 
 func TestParseProto(t *testing.T) {
-	for _, p := range []string{protoWG, protoAWG} {
+	for _, p := range []string{protoWG, protoAWG, protoMASQUE} {
 		run, err := parseProto(p)
-		if err != nil || run.name != p || run.isAWG() != (p == protoAWG) {
+		if err != nil || run.name != p || run.isAWG() != (p == protoAWG) || run.isMASQUE() != (p == protoMASQUE) {
 			t.Errorf("parseProto(%q) = %+v, %v", p, run, err)
 		}
 	}
 	if _, err := parseProto("both"); err == nil {
 		t.Error("parseProto(\"both\") accepted, want an error")
+	}
+}
+
+func TestPoolsFor(t *testing.T) {
+	masque := protoRun{kindMASQUE, protoMASQUE}
+	if got := poolsFor(masque, false); len(got) != len(masquePoolsV4) || got[0] != masquePoolsV4[0] {
+		t.Errorf("poolsFor(masque, v4) = %v, want the MASQUE pools", got)
+	}
+	if got := poolsFor(masque, true); len(got) != len(masquePoolsV6) {
+		t.Errorf("poolsFor(masque, v6) = %v, want the MASQUE v6 pools", got)
+	}
+	if got := poolsFor(protoRun{kindAWG, protoAWG}, false); len(got) != len(poolsV4) {
+		t.Errorf("poolsFor(awg, v4) = %d prefixes, want the WireGuard pools", len(got))
+	}
+}
+
+// The MASQUE prefixes are single addresses, so expansion must hand back exactly
+// those and never sample them away.
+func TestExpandMasquePools(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		pool  []netip.Prefix
+		count int
+	}{{"v4", masquePoolsV4, 2}, {"v6", masquePoolsV6, 2}} {
+		pools = tc.pool
+		for _, sample := range []int{0, 1, 5} {
+			if got := expandPools(sample); len(got) != tc.count {
+				t.Errorf("expandPools(%d) over %s = %v, want %d addresses", sample, tc.name, got, tc.count)
+			}
+		}
+	}
+	pools = poolsV4
+}
+
+func TestProbeTargets(t *testing.T) {
+	ips := []netip.Addr{netip.MustParseAddr("162.159.198.1"), netip.MustParseAddr("162.159.198.2")}
+	ports := []int{443, 8443}
+
+	wg := probeTargets(protoRun{kindAWG, protoAWG}, ips, ports)
+	if len(wg) != len(ips) {
+		t.Fatalf("wg targets = %d, want one per address", len(wg))
+	}
+	for _, tg := range wg {
+		if tg.port != 0 {
+			t.Errorf("wg target %v pins a port, want the tunnel's own list", tg)
+		}
+	}
+
+	// Working ports differ per MASQUE address, so every pair must be its own row.
+	masque := probeTargets(protoRun{kindMASQUE, protoMASQUE}, ips, ports)
+	if len(masque) != len(ips)*len(ports) {
+		t.Fatalf("masque targets = %d, want %d", len(masque), len(ips)*len(ports))
+	}
+	seen := map[string]bool{}
+	for _, tg := range masque {
+		seen[tg.ip.String()+":"+strconv.Itoa(tg.port)] = true
+	}
+	for _, want := range []string{"162.159.198.1:443", "162.159.198.1:8443", "162.159.198.2:443", "162.159.198.2:8443"} {
+		if !seen[want] {
+			t.Errorf("masque targets missing %s", want)
+		}
+	}
+}
+
+// A dead WireGuard peer is dead; a MASQUE endpoint has to fail every attempt
+// before it counts, because the same one answers on a later try.
+func TestTunnelAttempts(t *testing.T) {
+	if got := (&wgTunnel{}).attempts(); got != 1 {
+		t.Errorf("wgTunnel.attempts() = %d, want 1", got)
+	}
+	if masqueDefaultAttempts < 2 {
+		t.Errorf("masqueDefaultAttempts = %d, want more than one try", masqueDefaultAttempts)
+	}
+	saved := masqueAttempts
+	defer func() { masqueAttempts = saved }()
+	masqueAttempts = 7
+	if got := (&masqueTunnel{}).attempts(); got != 7 {
+		t.Errorf("masqueTunnel.attempts() = %d, want the -masque-attempts value", got)
+	}
+}
+
+func TestRenderMasqueConf(t *testing.T) {
+	saved := masqueAcct
+	defer func() { masqueAcct = saved }()
+	masqueAcct = &masqueAccount{
+		PrivateKey: "cHJpdg==", PeerPublicKey: "-----BEGIN PUBLIC KEY-----\nx\n-----END PUBLIC KEY-----\n",
+		ID: "dev-1", Token: "tok", IPv4: "172.16.0.2", IPv6: "2606:4700:110::1",
+	}
+
+	out, err := renderMasqueConf("162.159.198.1:8443")
+	if err != nil {
+		t.Fatalf("renderMasqueConf: %v", err)
+	}
+	var c usqueConf
+	if err := json.Unmarshal(out, &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if c.EndpointV4 != "162.159.198.1" {
+		t.Errorf("EndpointV4 = %q, want the scanned address without its port", c.EndpointV4)
+	}
+	// The other family keeps a usable default instead of being blanked out.
+	if c.EndpointV6 == "" {
+		t.Error("EndpointV6 is empty, want the default MASQUE v6 endpoint")
+	}
+	if c.ID != "dev-1" || c.AccessToken != "tok" || c.IPv4 != "172.16.0.2" {
+		t.Errorf("conf lost account fields: %+v", c)
+	}
+
+	if _, err := renderMasqueConf("162.159.198.1"); err == nil {
+		t.Error("renderMasqueConf accepted an endpoint without a port")
+	}
+}
+
+func TestRenderMasqueConfV6Endpoint(t *testing.T) {
+	saved := masqueAcct
+	defer func() { masqueAcct = saved }()
+	masqueAcct = &masqueAccount{PrivateKey: "cHJpdg==", ID: "dev-1"}
+
+	out, err := renderMasqueConf("[2606:4700:103::1]:443")
+	if err != nil {
+		t.Fatalf("renderMasqueConf: %v", err)
+	}
+	var c usqueConf
+	if err := json.Unmarshal(out, &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if c.EndpointV6 != "2606:4700:103::1" {
+		t.Errorf("EndpointV6 = %q, want the scanned v6 address", c.EndpointV6)
+	}
+	if c.EndpointV4 == "" {
+		t.Error("EndpointV4 is empty, want the default MASQUE v4 endpoint")
 	}
 }
 

@@ -31,6 +31,19 @@ var poolsV6 = []netip.Prefix{
 
 var pools = poolsV4
 
+func poolsFor(run protoRun, ipv6 bool) []netip.Prefix {
+	if run.isMASQUE() {
+		if ipv6 {
+			return masquePoolsV6
+		}
+		return masquePoolsV4
+	}
+	if ipv6 {
+		return poolsV6
+	}
+	return poolsV4
+}
+
 // Anything wider than /20 is what the built-in pools are for, and expandV4
 // would enumerate the whole range.
 const targetMinBitsV4 = 20

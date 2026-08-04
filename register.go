@@ -35,10 +35,20 @@ const (
 )
 
 type account struct {
+	ID            string         `json:"id"`
+	Token         string         `json:"token"`
+	PrivateKey    string         `json:"private_key"`
+	PeerPublicKey string         `json:"peer_public_key"`
+	Masque        *masqueAccount `json:"masque,omitempty"`
+}
+
+type masqueAccount struct {
 	ID            string `json:"id"`
 	Token         string `json:"token"`
 	PrivateKey    string `json:"private_key"`
 	PeerPublicKey string `json:"peer_public_key"`
+	IPv4          string `json:"ipv4"`
+	IPv6          string `json:"ipv6"`
 }
 
 func generateKeypair() (privB64, pubB64 string, err error) {
@@ -84,6 +94,7 @@ func saveAccount(path string, a account) error {
 func applyAccount(a account) {
 	warpPrivateKey = a.PrivateKey
 	warpPublicKey = a.PeerPublicKey
+	masqueAcct = a.Masque
 }
 
 type regResp struct {
@@ -161,6 +172,24 @@ func rotatedAccount(body []byte, priv string, existing account) (account, error)
 }
 
 func mintAccount(ctx context.Context, client *http.Client, existing account) (account, error) {
+	a, err := mintWGAccount(ctx, client, existing)
+	if err != nil {
+		return account{}, err
+	}
+	a.Masque = mintMasque(ctx, client, existing.Masque)
+	return a, nil
+}
+
+func mintMasque(ctx context.Context, client *http.Client, existing *masqueAccount) *masqueAccount {
+	m, err := registerMasque(ctx, client)
+	if err == nil {
+		return m
+	}
+	fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("MASQUE device registration failed (%v) - \"-p masque\" will not work", err)))
+	return existing
+}
+
+func mintWGAccount(ctx context.Context, client *http.Client, existing account) (account, error) {
 	if existing.ID == "" || existing.Token == "" {
 		return registerWARP(ctx, client)
 	}
@@ -173,6 +202,10 @@ func mintAccount(ctx context.Context, client *http.Client, existing account) (ac
 }
 
 func doJSON(ctx context.Context, client *http.Client, method, urlStr, token string, payload any) ([]byte, error) {
+	return doJSONAs(ctx, client, method, urlStr, token, cfUserAgent, cfClientVersion, payload)
+}
+
+func doJSONAs(ctx context.Context, client *http.Client, method, urlStr, token, userAgent, clientVersion string, payload any) ([]byte, error) {
 	buf, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -182,8 +215,8 @@ func doJSON(ctx context.Context, client *http.Client, method, urlStr, token stri
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", cfUserAgent)
-	req.Header.Set("CF-Client-Version", cfClientVersion)
+	req.Header.Set("User-Agent", userAgent)
+	req.Header.Set("CF-Client-Version", clientVersion)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
