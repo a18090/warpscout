@@ -441,5 +441,6 @@ warpscout scan -p awg -jt 6
 - [puzige/CloudflareWarpSpeedTest](https://github.com/puzige/CloudflareWarpSpeedTest) - запасной перебор портов и измерение RTT и потерь внутри туннеля
 - [ampetelin/warp-endpoint-checker](https://github.com/ampetelin/warp-endpoint-checker) - список IPv4-подсетей WARP
 - [TheyCallMeSecond/WARP-Endpoint-IP](https://github.com/TheyCallMeSecond/WARP-Endpoint-IP) - список IPv6-подсетей WARP
+- [SagePtr/mini_quic_generator](https://github.com/SagePtr/mini_quic_generator) - сборка QUIC Initial-пакета, портированная для профиля I1 `quic`
 - [amnezia-vpn/amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) - реализация AmneziaWG в пространстве пользователя
 - [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) - фреймворк, на котором сделана живая панель

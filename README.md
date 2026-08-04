@@ -441,5 +441,6 @@ warpscout scan -p awg -jt 6
 - [puzige/CloudflareWarpSpeedTest](https://github.com/puzige/CloudflareWarpSpeedTest) - the fallback port sweep, and measuring RTT and packet loss inside the tunnel
 - [ampetelin/warp-endpoint-checker](https://github.com/ampetelin/warp-endpoint-checker) - the list of IPv4 WARP subnets
 - [TheyCallMeSecond/WARP-Endpoint-IP](https://github.com/TheyCallMeSecond/WARP-Endpoint-IP) - the list of IPv6 WARP subnets
+- [SagePtr/mini_quic_generator](https://github.com/SagePtr/mini_quic_generator) - the QUIC Initial packet builder ported for the `quic` I1 profile
 - [amnezia-vpn/amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) - the user-space AmneziaWG implementation
 - [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) - the framework behind the live dashboard
