@@ -82,7 +82,7 @@ type scanModel struct {
 func newScanModel(cancel context.CancelFunc, ping bool) scanModel {
 	st := newConStyles(lipgloss.NewRenderer(os.Stderr))
 	sp := spinner.New()
-	sp.Spinner = spinner.Dot
+	sp.Spinner = scanSpinner
 	sp.Style = st.accent
 	return scanModel{
 		cancel:   cancel,
@@ -112,10 +112,10 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch {
 		case msg.fail:
 			m.step = ""
-			m.lines = append(m.lines, m.st.fail.Render("✗ "+msg.summary))
+			m.lines = append(m.lines, m.st.fail.Render(glyphFail+" "+msg.summary))
 		case msg.done:
 			m.step = ""
-			m.lines = append(m.lines, m.st.ok.Render("✔ ")+m.st.title.Render(msg.label)+": "+msg.summary)
+			m.lines = append(m.lines, m.st.ok.Render(glyphOK+" ")+m.st.title.Render(msg.label)+": "+msg.summary)
 		default:
 			m.step = msg.label
 		}
@@ -139,7 +139,7 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case barEndMsg:
 		m.label, m.total, m.done = "", 0, 0
-		m.lines = append(m.lines, m.st.ok.Render("✔ ")+m.st.title.Render(msg.label)+": "+msg.summary)
+		m.lines = append(m.lines, m.st.ok.Render(glyphOK+" ")+m.st.title.Render(msg.label)+": "+msg.summary)
 		return m, nil
 
 	case doneMsg:
