@@ -99,7 +99,7 @@ var (
 	outputGroup = flagGroup{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
 		{"", "no-report", "", "skip the report file entirely (overrides -o)"},
-		{"", "conf", "FILE", "write a ready-to-import config for the best endpoint"},
+		{"", "conf", "FILE", "write a ready-to-import config for the best endpoint (\"-\" prints it instead)"},
 		{"", "conf-type", "KIND", "format of -conf: native (wg/awg .conf, usque config.json) or mihomo"},
 		{"", "table-off", "", "add \"Table = off\" to the generated config: bring the interface up without touching routes"},
 		{"", "mtu", "N", "set MTU in the generated config (default: leave the line out)"},
@@ -222,6 +222,9 @@ func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
 // is a no-op for the commands it does not apply to.
 func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	for _, f := range []struct{ name, value string }{{"conf", o.conf}, {"o", o.output}} {
+		if f.name == "conf" && f.value == confStdout {
+			continue
+		}
 		if strings.HasPrefix(f.value, "-") {
 			fmt.Fprintf(os.Stderr, "-%s needs a file name, got %q\n", f.name, f.value)
 			os.Exit(2)

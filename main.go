@@ -138,9 +138,11 @@ func runScanCmd(ctx context.Context, opts options) error {
 		return fmt.Errorf("%s", noEndpointMsg(opts))
 	}
 
-	if opts.best {
+	switch {
+	case opts.best:
 		printBest(ph)
-	} else {
+	case opts.conf == confStdout:
+	default:
 		writeConsole(os.Stdout, ph, consoleRenderer(os.Stdout), opts.tunPingCheck)
 	}
 	if opts.conf != "" {
@@ -152,8 +154,7 @@ func runScanCmd(ctx context.Context, opts options) error {
 	}
 
 	reportPath := opts.output
-	// A pipe consumer asked for one line, not a stray report file.
-	if reportPath == "" && opts.best {
+	if reportPath == "" && (opts.best || opts.conf == confStdout) {
 		return nil
 	}
 	if reportPath == "" {
@@ -207,8 +208,16 @@ func writeConfFile(opts options, ph phaseResult) {
 		fmt.Fprintln(os.Stderr, errPal.fail(noWorkingMsg))
 		return
 	}
+	// The separator goes to stderr: on a terminal it still splits the config off
+	// the progress lines, and "-conf - > file" stays free of a leading blank line.
+	if opts.conf == confStdout {
+		fmt.Fprintln(os.Stderr)
+	}
 	if err := writeConf(opts, best.endpoint, ph.run); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", opts.conf, err)))
+		return
+	}
+	if opts.conf == confStdout {
 		return
 	}
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))

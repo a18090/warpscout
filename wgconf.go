@@ -52,9 +52,15 @@ func allowedIPs(ipv6 bool) string {
 	return "0.0.0.0/0"
 }
 
+const confStdout = "-"
+
 func writeConf(o options, endpoint string, run protoRun) error {
 	conf, err := renderConfFor(o, endpoint, run)
 	if err != nil {
+		return err
+	}
+	if o.conf == confStdout {
+		_, err := os.Stdout.Write(conf)
 		return err
 	}
 	return os.WriteFile(o.conf, conf, 0600)
