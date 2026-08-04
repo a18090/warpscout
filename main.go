@@ -240,6 +240,7 @@ func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, run
 		m.quitHint = quitHint
 	}
 	p := tea.NewProgram(m, tea.WithOutput(os.Stderr))
+	defer enableVirtualTerminal()
 
 	var ph phaseResult
 	var scanErr error

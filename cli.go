@@ -67,6 +67,7 @@ var commands = []command{
 }
 
 func main() {
+	enableVirtualTerminal()
 	errPal = palette{enabled: colorEnabled(os.Stderr)}
 
 	if len(os.Args) < 2 {
