@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -21,6 +22,7 @@ type options struct {
 	proto          string
 	output         string
 	conf           string
+	confType       string
 	proxy          string
 	freshAccount   bool
 	iface          string
@@ -97,7 +99,8 @@ var (
 	outputGroup = flagGroup{"Output", []flagSpec{
 		{"o", "output", "FILE", "full per-endpoint report file (default warpscout-report-<timestamp>.txt)"},
 		{"", "no-report", "", "skip the report file entirely (overrides -o)"},
-		{"", "conf", "FILE", "write a ready-to-import wg/awg config for the best endpoint"},
+		{"", "conf", "FILE", "write a ready-to-import config for the best endpoint"},
+		{"", "conf-type", "KIND", "format of -conf: native (wg/awg .conf, usque config.json) or mihomo"},
 		{"", "table-off", "", "add \"Table = off\" to the generated config: bring the interface up without touching routes"},
 		{"", "mtu", "N", "set MTU in the generated config (default: leave the line out)"},
 		{"", "node", "COLO", "keep only endpoints landing on these edge nodes: comma-separated IATA codes"},
@@ -182,6 +185,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.StringVar(&o.country, "country", "", "")
 	fs.BoolVar(&o.best, "best", false, "")
 	fs.StringVar(&o.conf, "conf", "", "")
+	fs.StringVar(&o.confType, "conf-type", confTypeNative, "")
 	fs.StringVar(&masqueSNI, "masque-sni", masqueDefaultSNI, "")
 	fs.IntVar(&masqueAttempts, "masque-attempts", masqueDefaultAttempts, "")
 	fs.BoolVar(&o.tableOff, "table-off", false, "")
@@ -256,6 +260,7 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	applyGenI1(fs, o)
 	validateJunkParams()
 	validateMTU(*o)
+	validateConfType(*o)
 	applyTarget(o)
 	applyNode(o)
 	rejectMasqueFilters(*o)
@@ -366,6 +371,24 @@ func validateMTU(o options) {
 	}
 	if o.mtu < mtuMin || o.mtu > mtuMax {
 		fmt.Fprintf(os.Stderr, "-mtu (%d) must be between %d and %d\n", o.mtu, mtuMin, mtuMax)
+		os.Exit(2)
+	}
+}
+
+func validateConfType(o options) {
+	if o.confType == "" {
+		return
+	}
+	if !slices.Contains(confTypes, o.confType) {
+		fmt.Fprintf(os.Stderr, "-conf-type %q must be one of %s\n", o.confType, strings.Join(confTypes, ", "))
+		os.Exit(2)
+	}
+	if o.conf == "" && o.confType != confTypeNative {
+		fmt.Fprintln(os.Stderr, "-conf-type needs -conf FILE")
+		os.Exit(2)
+	}
+	if o.tableOff && o.confType == confTypeMihomo {
+		fmt.Fprintln(os.Stderr, "-table-off does not apply to -conf-type mihomo: the client owns the routes")
 		os.Exit(2)
 	}
 }

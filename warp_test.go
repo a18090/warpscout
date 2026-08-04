@@ -236,6 +236,62 @@ func TestRenderConf(t *testing.T) {
 	}
 }
 
+func TestRenderMihomoConf(t *testing.T) {
+	conf, err := renderMihomoConf(options{confType: confTypeMihomo}, "188.114.98.5:2408", protoRun{kindAWG, protoAWG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	awg := string(conf)
+	for _, want := range []string{
+		"proxies:",
+		"- name: \"WARP 188.114.98.5:2408\"",
+		"server: 188.114.98.5",
+		"port: 2408",
+		"type: wireguard",
+		"private-key: " + warpPrivateKey,
+		"public-key: " + warpPublicKey,
+		"ip: " + warpAddress,
+		"allowed-ips: ['0.0.0.0/0']",
+		"amnezia-wg-option:",
+		"jc: 6", "jmin: 10", "jmax: 50",
+		"h4: 4",
+		"i1: " + i1Default,
+		"udp: true",
+	} {
+		if !strings.Contains(awg, want) {
+			t.Errorf("mihomo config missing %q:\n%s", want, awg)
+		}
+	}
+	if strings.Contains(awg, "mtu:") {
+		t.Errorf("mtu must be absent without -mtu:\n%s", awg)
+	}
+	if strings.Contains(awg, "ipv6:") || strings.Contains(awg, "::") {
+		t.Errorf("IPv4 config must not carry IPv6:\n%s", awg)
+	}
+
+	conf, err = renderMihomoConf(options{confType: confTypeMihomo, ipv6: true}, "[2606:4700:d0::1]:2408", protoRun{kindAWG, protoAWG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	v6 := string(conf)
+	for _, want := range []string{"server: 2606:4700:d0::1", "ipv6: " + warpAddressV6, "allowed-ips: ['::/0']", "dns: " + mihomoDNSv6} {
+		if !strings.Contains(v6, want) {
+			t.Errorf("IPv6 mihomo config missing %q:\n%s", want, v6)
+		}
+	}
+	if strings.Contains(v6, "ip: ") || strings.Contains(v6, "1.1.1.1") {
+		t.Errorf("IPv6 config must not carry IPv4:\n%s", v6)
+	}
+
+	conf, err = renderMihomoConf(options{confType: confTypeMihomo}, "188.114.98.5:2408", protoRun{kindWG, protoWG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wg := string(conf); strings.Contains(wg, "amnezia-wg-option") {
+		t.Errorf("plain WireGuard config must not carry junk params:\n%s", wg)
+	}
+}
+
 func TestRenderConfNoInitPacket(t *testing.T) {
 	orig := awgI1
 	defer func() { awgI1 = orig }()

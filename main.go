@@ -212,7 +212,7 @@ func writeConfFile(opts options, ph phaseResult) {
 		return
 	}
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))
-	if ph.run.isMASQUE() {
+	if ph.run.isMASQUE() && opts.confType != confTypeMihomo {
 		if _, port, err := net.SplitHostPort(best.endpoint); err == nil {
 			fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf(
 				"  run it with: usque socks -c %s -P %s -s %s", opts.conf, port, masqueSNI)))
