@@ -71,7 +71,7 @@ func runRegisterCmd(ctx context.Context, opts options) error {
 		existing, _ = loadAccount(opts.accountPath)
 	}
 
-	a, err := obtainAccount(ctx, opts, true, ips, timeout, existing)
+	a, err := obtainAccount(ctx, opts, ips, timeout, existing)
 	if err != nil {
 		if opts.proxy == "" {
 			return fmt.Errorf("registration failed: %v\ncould not register directly or through a WARP tunnel; retry with -proxy <http(s)/socks5 URL>", err)
@@ -111,7 +111,6 @@ func runScanCmd(ctx context.Context, opts options) error {
 	if err != nil {
 		return err
 	}
-
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	ph, err := runScanUI(ctx, cancel, opts, run, ips, time.Duration(opts.timeoutSec)*time.Second, "", "")
@@ -202,7 +201,7 @@ func writeConfFile(opts options, ph phaseResult) {
 		fmt.Fprintln(os.Stderr, errPal.fail(noWorkingMsg))
 		return
 	}
-	if err := writeConf(opts, best.endpoint, ph.run.awg); err != nil {
+	if err := writeConf(opts, best.endpoint, ph.run); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", opts.conf, err)))
 		return
 	}
@@ -265,7 +264,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 	if scanSourceIP.IsValid() {
 		emit(stepMsg{done: true, label: "Interface", summary: fmt.Sprintf("%s (%s)", opts.iface, scanSourceIP)})
 	}
-	open, err := reachablePorts(ctx, run.awg, ips, timeout, portProbeSample, emit)
+	open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, emit)
 	if err != nil {
 		emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
 		return phaseResult{}, err
@@ -280,11 +279,11 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 	pings := opts.tunPingCount
 	label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)
 	emit(barBeginMsg{label: label, total: len(ips)})
-	work := func(tn *tunnel, i int) {
+	work := func(tn tunnel, i int) {
 		defer emit(probedMsg{})
 		ip := ips[i]
 		r := endpointResult{ip: ip}
-		if t, endpoint, ok, rtt, loss, torn := tn.probe(ctx, ip, timeout, pings, opts.wantMeta); ok {
+		if t, endpoint, ok, rtt, loss, torn := tunnelProbe(ctx, tn, ip, timeout, pings, opts.wantMeta); ok {
 			r.exit, r.endpoint, r.ok, r.durable = t, endpoint, true, true
 			if pings > 0 {
 				r.tunPing, r.loss, r.measured, r.durable = rtt, loss, true, !torn
@@ -300,7 +299,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		}
 		results[i] = r
 	}
-	if err := runTunnelPool(opts.tunnelParallel, run.awg, len(ips), work); err != nil {
+	if err := runTunnelPool(opts.tunnelParallel, run, len(ips), work); err != nil {
 		emit(stepMsg{fail: true, summary: err.Error()})
 		return phaseResult{}, err
 	}

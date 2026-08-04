@@ -15,7 +15,7 @@ import (
 
 func TestWriteConsolePalette(t *testing.T) {
 	ph := phaseResult{
-		run: protoRun{false, "wg"},
+		run: protoRun{kindWG, "wg"},
 		results: []endpointResult{{
 			ip:       netip.MustParseAddr("8.47.69.86"),
 			exit:     metaResult{loc: "RU", colo: "DME"},
@@ -193,7 +193,7 @@ func TestBaseUAPI(t *testing.T) {
 }
 
 func TestRenderConf(t *testing.T) {
-	awg := renderConf(options{ipv6: true}, "188.114.98.5:2408", true)
+	awg := renderConf(options{ipv6: true}, "188.114.98.5:2408", protoRun{kindAWG, protoAWG})
 	for _, want := range []string{
 		"[Interface]",
 		"Address = " + warpAddressV6 + "/128",
@@ -220,7 +220,7 @@ func TestRenderConf(t *testing.T) {
 		t.Errorf("IPv6 config must not carry IPv4:\n%s", awg)
 	}
 
-	wg := renderConf(options{tableOff: true, mtu: 1420}, "188.114.98.5:2408", false)
+	wg := renderConf(options{tableOff: true, mtu: 1420}, "188.114.98.5:2408", protoRun{kindWG, protoWG})
 	for _, unwanted := range []string{"Jc = ", "Jmin = ", "Jmax = ", "I1 = ", "::"} {
 		if strings.Contains(wg, unwanted) {
 			t.Errorf("plain WireGuard config must not contain %q:\n%s", unwanted, wg)
@@ -239,7 +239,7 @@ func TestRenderConfNoInitPacket(t *testing.T) {
 	defer func() { awgI1 = orig }()
 
 	awgI1 = ""
-	if conf := renderConf(options{}, "188.114.98.5:2408", true); strings.Contains(conf, "I1 = ") {
+	if conf := renderConf(options{}, "188.114.98.5:2408", protoRun{kindAWG, protoAWG}); strings.Contains(conf, "I1 = ") {
 		t.Errorf("init packet must be omitted when empty:\n%s", conf)
 	}
 }
@@ -315,7 +315,7 @@ func TestJunkCommand(t *testing.T) {
 func TestParseProto(t *testing.T) {
 	for _, p := range []string{protoWG, protoAWG} {
 		run, err := parseProto(p)
-		if err != nil || run.name != p || run.awg != (p == protoAWG) {
+		if err != nil || run.name != p || run.isAWG() != (p == protoAWG) {
 			t.Errorf("parseProto(%q) = %+v, %v", p, run, err)
 		}
 	}
@@ -472,7 +472,7 @@ func TestExpandTargets(t *testing.T) {
 }
 
 func TestFilterByColo(t *testing.T) {
-	ph := phaseResult{run: protoRun{true, "awg"}, results: []endpointResult{
+	ph := phaseResult{run: protoRun{kindAWG, "awg"}, results: []endpointResult{
 		{endpoint: "1.1.1.1:2408", exit: metaResult{colo: "HEL"}},
 		{endpoint: "2.2.2.2:2408", exit: metaResult{colo: "FRA"}},
 		{endpoint: "3.3.3.3:2408"},
@@ -491,7 +491,7 @@ func TestFilterByColo(t *testing.T) {
 }
 
 func TestFilterByCountry(t *testing.T) {
-	ph := phaseResult{run: protoRun{true, "awg"}, results: []endpointResult{
+	ph := phaseResult{run: protoRun{kindAWG, "awg"}, results: []endpointResult{
 		{endpoint: "1.1.1.1:2408", exit: metaResult{colo: "HEL", coloISO: "FI"}},
 		{endpoint: "2.2.2.2:2408", exit: metaResult{colo: "FRA", coloISO: "DE"}},
 		{endpoint: "3.3.3.3:2408"},
@@ -572,14 +572,14 @@ func TestExpandV6(t *testing.T) {
 
 func TestRegI1Candidates(t *testing.T) {
 	const cur = "<b 0xdead>"
-	if got := regI1Candidates(false, options{}, cur, ""); len(got) != 1 || got[0].chain != cur {
+	if got := regI1Candidates(protoRun{kindWG, protoWG}, options{}, cur, ""); len(got) != 1 || got[0].chain != cur {
 		t.Errorf("wg candidates = %v, want the current I1 only", got)
 	}
-	if got := regI1Candidates(true, options{i1Explicit: true}, cur, "x"); len(got) != 1 || got[0].chain != cur {
+	if got := regI1Candidates(protoRun{kindAWG, protoAWG}, options{i1Explicit: true}, cur, "x"); len(got) != 1 || got[0].chain != cur {
 		t.Errorf("explicit I1 candidates = %v, want the current I1 only", got)
 	}
 
-	got := regI1Candidates(true, options{}, cur, "")
+	got := regI1Candidates(protoRun{kindAWG, protoAWG}, options{}, cur, "")
 	if want := 1 + len(i1Profiles()); len(got) != want {
 		t.Fatalf("awg candidates = %d, want %d", len(got), want)
 	}

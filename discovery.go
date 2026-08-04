@@ -92,8 +92,8 @@ func interfaceAddr(name string, v6 bool) (netip.Addr, error) {
 	return netip.Addr{}, fmt.Errorf("interface %s has no %s address", name, famName(v6))
 }
 
-func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, sample int, emit emitter) ([]int, error) {
-	tn, err := newTunnel(awg)
+func reachablePorts(ctx context.Context, run protoRun, ips []netip.Addr, timeout time.Duration, sample int, emit emitter) ([]int, error) {
+	tn, err := newTunnel(run)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func reachablePorts(ctx context.Context, awg bool, ips []netip.Addr, timeout tim
 	return probePorts(ctx, tn, sampled, extendedWarpPorts, timeout, emit, "Phase 1: sweeping alternate WARP ports"), nil
 }
 
-func probePorts(ctx context.Context, tn *tunnel, ips []netip.Addr, ports []int, timeout time.Duration, emit emitter, label string) []int {
+func probePorts(ctx context.Context, tn tunnel, ips []netip.Addr, ports []int, timeout time.Duration, emit emitter, label string) []int {
 	emit(barBeginMsg{label: label, total: len(ips)})
 	open := make(map[int]bool)
 	for _, ip := range ips {

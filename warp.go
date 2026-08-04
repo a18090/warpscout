@@ -129,8 +129,15 @@ func peerUAPI(endpoint string) (string, error) {
 	return b.String(), nil
 }
 
+type protoKind int
+
+const (
+	kindWG protoKind = iota
+	kindAWG
+)
+
 type protoRun struct {
-	awg  bool
+	kind protoKind
 	name string
 }
 
@@ -139,20 +146,18 @@ const (
 	protoAWG = "awg"
 )
 
-func parseProto(p string) (protoRun, error) {
-	switch p {
-	case protoWG:
-		return protoRun{false, protoWG}, nil
-	case protoAWG:
-		return protoRun{true, protoAWG}, nil
-	default:
-		return protoRun{}, fmt.Errorf("invalid -proto %q: use wg or awg", p)
-	}
+func (r protoRun) isAWG() bool { return r.kind == kindAWG }
+
+var protoRuns = []protoRun{
+	{kindWG, protoWG},
+	{kindAWG, protoAWG},
 }
 
-func protoName(awg bool) string {
-	if awg {
-		return protoAWG
+func parseProto(p string) (protoRun, error) {
+	for _, r := range protoRuns {
+		if r.name == p {
+			return r, nil
+		}
 	}
-	return protoWG
+	return protoRun{}, fmt.Errorf("invalid -proto %q: use wg or awg", p)
 }

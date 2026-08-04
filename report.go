@@ -314,7 +314,7 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 	fmt.Fprintln(w, banner(st))
 	fmt.Fprintln(w)
 	fmt.Fprintf(w, "Proto:     %s\n", st.accent.Render(strings.ToUpper(ph.run.name)))
-	writeJunkNote(w, st, ph.run.awg)
+	writeJunkNote(w, st, ph.run)
 	fmt.Fprintf(w, "Nodes:     %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, noFlag)))
 	fmt.Fprintf(w, "Seen as:   %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
 	fmt.Fprintf(w, "Working:   %s\n", st.ok.Render(strconv.Itoa(len(working)))+st.dim.Render(" / ")+strconv.Itoa(len(results))+" probed")
@@ -322,8 +322,8 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 	writePicksTable(w, st, working, torn, ping)
 }
 
-func writeJunkNote(w io.Writer, st conStyles, awg bool) {
-	if !awg {
+func writeJunkNote(w io.Writer, st conStyles, run protoRun) {
+	if !run.isAWG() {
 		return
 	}
 	fmt.Fprintf(w, "Junk:      %s %s\n",

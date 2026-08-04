@@ -12,29 +12,54 @@ import (
 
 	"github.com/amnezia-vpn/amneziawg-go/conn"
 	"github.com/amnezia-vpn/amneziawg-go/device"
+	"github.com/amnezia-vpn/amneziawg-go/tun"
 	"github.com/amnezia-vpn/amneziawg-go/tun/netstack"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 )
 
-// The gvisor stack behind netstack.CreateNetTUN is never freed by the library
-// (netTun.Close only RemoveNIC), so one tunnel per IP leaks and OOMs. Tunnels
-// are pooled and only the peer endpoint is swapped, bounding live stacks to the
-// worker count.
-type tunnel struct {
-	dev    *device.Device
+type ipStack struct {
 	tnet   *netstack.Net
 	client *http.Client
 }
 
-func newTunnel(awg bool) (*tunnel, error) {
+func newIPStack(local []netip.Addr) (tun.Device, *ipStack, error) {
+	tunDev, tnet, err := netstack.CreateNetTUN(local, []netip.Addr{netip.MustParseAddr(pingTarget)}, tunnelMTU)
+	if err != nil {
+		return nil, nil, err
+	}
+	transport := &http.Transport{
+		DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
+			return tnet.DialContext(ctx, "tcp", metaAddr)
+		},
+	}
+	return tunDev, &ipStack{tnet: tnet, client: &http.Client{Transport: transport}}, nil
+}
+
+type tunnel interface {
+	handshake(ctx context.Context, endpoint string, timeout time.Duration) bool
+	ports() []int
+	stack() *ipStack
+	Close()
+}
+
+func newTunnel(run protoRun) (tunnel, error) {
+	return newWGTunnel(run.isAWG())
+}
+
+type wgTunnel struct {
+	*ipStack
+	dev *device.Device
+}
+
+func newWGTunnel(awg bool) (*wgTunnel, error) {
 	base, err := baseUAPI(awg)
 	if err != nil {
 		return nil, err
 	}
 
-	localAddr := netip.MustParseAddr(warpAddress)
-	tunDev, tnet, err := netstack.CreateNetTUN([]netip.Addr{localAddr}, []netip.Addr{netip.MustParseAddr(pingTarget)}, tunnelMTU)
+	tunDev, stack, err := newIPStack([]netip.Addr{netip.MustParseAddr(warpAddress)})
 	if err != nil {
 		return nil, err
 	}
@@ -52,38 +77,14 @@ func newTunnel(awg bool) (*tunnel, error) {
 		dev.Close()
 		return nil, err
 	}
-
-	transport := &http.Transport{
-		DisableKeepAlives: true,
-		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return tnet.DialContext(ctx, "tcp", metaAddr)
-		},
-	}
-	return &tunnel{dev: dev, tnet: tnet, client: &http.Client{Transport: transport}}, nil
+	return &wgTunnel{ipStack: stack, dev: dev}, nil
 }
 
-func (t *tunnel) Close() { t.dev.Close() }
+func (t *wgTunnel) Close()          { t.dev.Close() }
+func (t *wgTunnel) ports() []int    { return warpPorts }
+func (t *wgTunnel) stack() *ipStack { return t.ipStack }
 
-func (t *tunnel) probe(ctx context.Context, ip netip.Addr, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, endpoint string, ok bool, rtt time.Duration, loss float32, torn bool) {
-	for _, port := range warpPorts {
-		endpoint = net.JoinHostPort(ip.String(), strconv.Itoa(port))
-		if tr, rtt, loss, torn, ok = t.probeEndpoint(ctx, endpoint, timeout, pings, wantMeta); ok {
-			return tr, endpoint, true, rtt, loss, torn
-		}
-	}
-	return metaResult{}, endpoint, false, 0, 0, false
-}
-
-func (t *tunnel) connect(ctx context.Context, ip netip.Addr, timeout time.Duration) bool {
-	for _, port := range warpPorts {
-		if t.handshake(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(port)), timeout) {
-			return true
-		}
-	}
-	return false
-}
-
-func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Duration) bool {
+func (t *wgTunnel) handshake(ctx context.Context, endpoint string, timeout time.Duration) bool {
 	peer, err := peerUAPI(endpoint)
 	if err != nil {
 		return false
@@ -94,20 +95,30 @@ func (t *tunnel) handshake(ctx context.Context, endpoint string, timeout time.Du
 	return waitHandshake(ctx, t.dev, timeout)
 }
 
-func (t *tunnel) probeEndpoint(ctx context.Context, endpoint string, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, rtt time.Duration, loss float32, torn, ok bool) {
-	peer, err := peerUAPI(endpoint)
-	if err != nil {
-		return metaResult{}, 0, 0, false, false
+func tunnelProbe(ctx context.Context, t tunnel, ip netip.Addr, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, endpoint string, ok bool, rtt time.Duration, loss float32, torn bool) {
+	for _, port := range t.ports() {
+		endpoint = net.JoinHostPort(ip.String(), strconv.Itoa(port))
+		if tr, rtt, loss, torn, ok = probeEndpoint(ctx, t, endpoint, timeout, pings, wantMeta); ok {
+			return tr, endpoint, true, rtt, loss, torn
+		}
 	}
-	if err := t.dev.IpcSet(peer); err != nil {
-		return metaResult{}, 0, 0, false, false
-	}
+	return metaResult{}, endpoint, false, 0, 0, false
+}
 
-	// Wait for the handshake before sending traffic, otherwise the first TCP SYN
-	// is dropped by the not-yet-established peer and netstack stalls past timeout.
-	if !waitHandshake(ctx, t.dev, timeout) {
+func tunnelConnect(ctx context.Context, t tunnel, ip netip.Addr, timeout time.Duration) bool {
+	for _, port := range t.ports() {
+		if t.handshake(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(port)), timeout) {
+			return true
+		}
+	}
+	return false
+}
+
+func probeEndpoint(ctx context.Context, t tunnel, endpoint string, timeout time.Duration, pings int, wantMeta bool) (tr metaResult, rtt time.Duration, loss float32, torn, ok bool) {
+	if !t.handshake(ctx, endpoint, timeout) {
 		return metaResult{}, 0, 0, false, false
 	}
+	st := t.stack()
 
 	// find-junk only asks whether the peer comes up, and the durability ping
 	// already proves the tunnel passes data - the meta fetch adds nothing.
@@ -115,18 +126,18 @@ func (t *tunnel) probeEndpoint(ctx context.Context, endpoint string, timeout tim
 		if pings <= 0 {
 			return metaResult{}, 0, 0, false, true
 		}
-		rtt, loss, torn = t.durability(pings, timeout)
+		rtt, loss, torn = st.durability(pings, timeout)
 		return metaResult{}, rtt, loss, torn, true
 	}
 
-	body, ok := t.fetch(ctx, timeout)
+	body, ok := st.fetch(ctx, timeout)
 	if !ok {
 		return metaResult{}, 0, 0, false, false
 	}
 	if pings <= 0 {
 		return parseMeta(body), 0, 0, false, true
 	}
-	rtt, loss, torn = t.durability(pings, timeout)
+	rtt, loss, torn = st.durability(pings, timeout)
 	return parseMeta(body), rtt, loss, torn, true
 }
 
@@ -134,26 +145,26 @@ func (t *tunnel) probeEndpoint(ctx context.Context, endpoint string, timeout tim
 // so the second burst's numbers are the ones reported when the first was noise.
 // Running right after the meta fetch lets the burst read the tunnel's state once a
 // real request has already given DPI something to kill.
-func (t *tunnel) durability(count int, timeout time.Duration) (time.Duration, float32, bool) {
-	rtt, loss, torn := t.tunnelPing(count, timeout)
+func (s *ipStack) durability(count int, timeout time.Duration) (time.Duration, float32, bool) {
+	rtt, loss, torn := s.tunnelPing(count, timeout)
 	if !torn {
 		return rtt, loss, false
 	}
-	rtt2, loss2, torn2 := t.tunnelPing(count, timeout)
+	rtt2, loss2, torn2 := s.tunnelPing(count, timeout)
 	if !torn2 {
 		return rtt2, loss2, false
 	}
 	return rtt, loss, true
 }
 
-func (t *tunnel) fetch(ctx context.Context, timeout time.Duration) (string, bool) {
+func (s *ipStack) fetch(ctx context.Context, timeout time.Duration) (string, bool) {
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	if !resolveMetaAddr(reqCtx, t.tnet) {
+	if !resolveMetaAddr(reqCtx, s.tnet) {
 		return "", false
 	}
-	t.client.Timeout = timeout
-	return fetchMeta(reqCtx, t.client, metaURL)
+	s.client.Timeout = timeout
+	return fetchMeta(reqCtx, s.client, metaURL)
 }
 
 var (
@@ -196,9 +207,9 @@ const (
 // matched by sequence in a shared window: a reply merely delayed by a contended
 // netstack (many userspace tunnels at once) still counts instead of scoring as
 // a loss.
-func (t *tunnel) tunnelPing(count int, timeout time.Duration) (time.Duration, float32, bool) {
+func (s *ipStack) tunnelPing(count int, timeout time.Duration) (time.Duration, float32, bool) {
 	dst := netip.MustParseAddr(pingTarget)
-	pc, err := t.tnet.DialPingAddr(netip.Addr{}, dst)
+	pc, err := s.tnet.DialPingAddr(netip.Addr{}, dst)
 	if err != nil {
 		return 0, 0, false
 	}
@@ -228,7 +239,7 @@ func (t *tunnel) tunnelPing(count int, timeout time.Duration) (time.Duration, fl
 	}
 
 	for seq := 0; seq < count; seq++ {
-		if t.sendEcho(pc, seq) {
+		if s.sendEcho(pc, seq) {
 			sent[seq] = time.Now()
 		}
 		drain(time.Now().Add(pingInterval))
@@ -238,7 +249,7 @@ func (t *tunnel) tunnelPing(count int, timeout time.Duration) (time.Duration, fl
 	return pingSummary(total, n), lossFraction(n, count), teardown(got)
 }
 
-func (t *tunnel) sendEcho(pc *netstack.PingConn, seq int) bool {
+func (s *ipStack) sendEcho(pc *netstack.PingConn, seq int) bool {
 	msg := icmp.Message{
 		Type: ipv4.ICMPTypeEcho,
 		Body: &icmp.Echo{ID: 0xbeef, Seq: seq, Data: []byte("warpscout")},

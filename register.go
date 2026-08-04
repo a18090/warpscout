@@ -288,7 +288,7 @@ const tunnelDiscoverySample = 64
 
 const tunnelDiscoveryBudget = 40 * time.Second
 
-func obtainAccount(ctx context.Context, o options, awg bool, ips []netip.Addr, timeout time.Duration, existing account) (account, error) {
+func obtainAccount(ctx context.Context, o options, ips []netip.Addr, timeout time.Duration, existing account) (account, error) {
 	if o.proxy != "" {
 		c, err := proxyClient(o.proxy)
 		if err != nil {
@@ -309,12 +309,12 @@ func obtainAccount(ctx context.Context, o options, awg bool, ips []netip.Addr, t
 	sampled := sampleAddrs(ips, tunnelDiscoverySample)
 	origI1, origLabel := awgI1, genI1Label
 	var lastErr error
-	for _, p := range []bool{awg, !awg} {
+	for _, p := range []protoRun{{kindAWG, protoAWG}, {kindWG, protoWG}} {
 		for _, c := range regI1Candidates(p, o, origI1, origLabel) {
 			// newTunnel bakes the globals into the UAPI config, so set them first.
 			awgI1, genI1Label = c.chain, c.label
-			label := protoName(p)
-			if p && !o.i1Explicit {
+			label := p.name
+			if p.isAWG() && !o.i1Explicit {
 				label += fmt.Sprintf(" (%s)", i1NoteFor(c.chain, c.label))
 			}
 			onProbe := discoveryProgress(label, len(sampled), usePlainOutput(o))
@@ -338,8 +338,8 @@ type i1Candidate struct{ chain, label string }
 
 // Only awg carries an I1, and an explicit -i1/-gen-i1 is the user's choice - the
 // fallback sweep only replaces the default probe when DPI drops it.
-func regI1Candidates(awg bool, o options, curChain, curLabel string) []i1Candidate {
-	if !awg || o.i1Explicit {
+func regI1Candidates(run protoRun, o options, curChain, curLabel string) []i1Candidate {
+	if !run.isAWG() || o.i1Explicit {
 		return []i1Candidate{{curChain, curLabel}}
 	}
 	cands := []i1Candidate{{i1Default, ""}}
@@ -377,8 +377,8 @@ func discoveryProgress(what string, total int, plain bool) func(probed int) {
 
 // The handshake is the only reachability test that survives the DPI which
 // forced the tunnel fallback in the first place.
-func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout time.Duration, onProbe func(probed int), existing account) (account, error) {
-	tn, err := newTunnel(awg)
+func registerViaTunnel(ctx context.Context, run protoRun, ips []netip.Addr, timeout time.Duration, onProbe func(probed int), existing account) (account, error) {
+	tn, err := newTunnel(run)
 	if err != nil {
 		return account{}, err
 	}
@@ -393,10 +393,10 @@ func registerViaTunnel(ctx context.Context, awg bool, ips []netip.Addr, timeout 
 		if onProbe != nil {
 			onProbe(i + 1)
 		}
-		if !tn.connect(ctx, ip, timeout) {
+		if !tunnelConnect(ctx, tn, ip, timeout) {
 			continue
 		}
-		client, err := tunnelClient(tn.tnet)
+		client, err := tunnelClient(tn.stack().tnet)
 		if err != nil {
 			return account{}, err
 		}

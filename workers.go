@@ -24,14 +24,14 @@ func runPool(workers, n int, fn func(i int)) {
 	wg.Wait()
 }
 
-func runTunnelPool(workers int, awg bool, n int, fn func(tn *tunnel, i int)) error {
+func runTunnelPool(workers int, run protoRun, n int, fn func(tn tunnel, i int)) error {
 	if workers < 1 {
 		workers = 1
 	}
 
-	var tunnels []*tunnel
+	var tunnels []tunnel
 	for len(tunnels) < workers {
-		tn, err := newTunnel(awg)
+		tn, err := newTunnel(run)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "tunnel setup failed: %v\n", err)
 			break
@@ -51,7 +51,7 @@ func runTunnelPool(workers int, awg bool, n int, fn func(tn *tunnel, i int)) err
 	var wg sync.WaitGroup
 	for _, tn := range tunnels {
 		wg.Add(1)
-		go func(tn *tunnel) {
+		go func(tn tunnel) {
 			defer wg.Done()
 			for i := range jobs {
 				fn(tn, i)

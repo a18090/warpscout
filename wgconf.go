@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-func renderConf(o options, endpoint string, awg bool) string {
+func renderConf(o options, endpoint string, run protoRun) string {
 	var b strings.Builder
 
 	fmt.Fprintf(&b, "[Interface]\n")
@@ -22,7 +22,7 @@ func renderConf(o options, endpoint string, awg bool) string {
 	if o.tableOff {
 		fmt.Fprintf(&b, "Table = off\n")
 	}
-	if awg {
+	if run.isAWG() {
 		fmt.Fprintf(&b, "Jc = %d\n", awgJc)
 		fmt.Fprintf(&b, "Jmin = %d\n", awgJmin)
 		fmt.Fprintf(&b, "Jmax = %d\n", awgJmax)
@@ -49,6 +49,6 @@ func allowedIPs(ipv6 bool) string {
 	return "0.0.0.0/0"
 }
 
-func writeConf(o options, endpoint string, awg bool) error {
-	return os.WriteFile(o.conf, []byte(renderConf(o, endpoint, awg)), 0600)
+func writeConf(o options, endpoint string, run protoRun) error {
+	return os.WriteFile(o.conf, []byte(renderConf(o, endpoint, run)), 0600)
 }
