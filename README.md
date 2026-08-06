@@ -170,13 +170,14 @@ See [Docker](#docker-1) for what the flags are for.
 
 ## Usage
 
-WARPSCOUT has four commands. Run `warpscout <command> -h` for the full flag list of any of them.
+WARPSCOUT has five commands. Run `warpscout <command> -h` for the full flag list of any of them.
 
 | Command     | What it does                                             |
 | ----------- | -------------------------------------------------------- |
 | `register`  | Create a WARP account and save it. Start with this.      |
 | `scan`      | Scan endpoints and report the working ones.              |
 | `find-junk` | Search for AmneziaWG settings that get through a filter. |
+| `find-sni`  | Search for a MASQUE SNI that gets through a filter.      |
 | `version`   | Print the installed version on a line of its own.        |
 
 ### Step 1: register
@@ -427,7 +428,13 @@ MASQUE has no junk packets and no `I1`. Their equivalent is the SNI, and changin
 warpscout scan -p masque -masque-sni www.apple.com
 ```
 
-Without `-masque-sni` the default is `consumer-masque.cloudflareclient.com`. If `-p masque` found nothing with it, try another `-masque-sni`.
+Without `-masque-sni` the default is `consumer-masque.cloudflareclient.com`. If `-p masque` found nothing with it, `find-sni` tries a list of names for you and prints the scan command for the best one:
+
+```sh
+warpscout find-sni
+```
+
+It stops as soon as one SNI brings up the `-threshold` share of the endpoints (70% by default), and Ctrl+C keeps the best one found so far. Like `find-junk`, it only checks the handshake and the in-tunnel ping, so no exit region or node is resolved.
 
 ### Registration and configs
 
