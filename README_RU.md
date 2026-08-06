@@ -22,6 +22,7 @@
 - [Использование](#использование)
 - [Скриптинг](#скриптинг)
 - [Обфускация AmneziaWG](#обфускация-amneziawg)
+- [MASQUE](#masque)
 - [Docker](#docker-1)
 - [Решение проблем](#решение-проблем)
 - [Благодарности](#благодарности)
@@ -208,7 +209,7 @@ warpscout register -x socks5://127.0.0.1:1080
 warpscout scan -p awg
 ```
 
-`-p/-proto` выбирает протокол: `wg` (по умолчанию) или `awg`. В сетях, фильтрующих VPN-трафик, обычный `wg` обычно не работает нигде, и стоит сразу использовать `awg`.
+`-p/-proto` выбирает протокол: `wg` (по умолчанию), `awg` или `masque`. В сетях, фильтрующих VPN-трафик, обычный `wg` обычно не работает нигде, и стоит сразу использовать `awg` или `masque`, см. [MASQUE](#masque).
 
 Если с `-p awg` не нашлось ни одного рабочего эндпоинта, менять дальше нужно поддельный первый пакет (`I1`), а не junk параметры:
 
@@ -302,6 +303,13 @@ warpscout scan -p awg -node HEL,ARN -best
 warpscout scan -p awg -country DE -conf warp.conf
 ```
 
+`-conf -` печатает конфиг в терминал, чтобы можно было скопировать его, либо направить в пайп.
+
+```sh
+warpscout scan -p awg -conf -
+warpscout scan -p awg -conf - > warp.conf
+```
+
 Добавьте `-table-off`, если маршрутизируете трафик сами и не хотите, чтобы конфиг трогал маршруты.
 
 ```sh
@@ -312,6 +320,13 @@ warpscout scan -p awg -conf warp.conf -table-off
 
 ```sh
 warpscout scan -p awg -conf warp.conf -mtu 1280
+```
+
+`-conf-type` выбирает формат конфига. По умолчанию `native` - то, что описано выше: `.conf` для `wg`/`awg` и `config.json` для `masque` под использование с [usque](https://github.com/Diniboy1123/usque). `mihomo` пишет блок `proxies:` для [mihomo](https://github.com/MetaCubeX/mihomo), который умеет и AmneziaWG и MASQUE.
+
+```sh
+warpscout scan -p awg -conf warp.yaml -conf-type mihomo
+warpscout scan -p masque -conf warp.yaml -conf-type mihomo
 ```
 
 `-target` сканирует указанные адреса вместо встроенных пулов. Принимает отдельные IP-адреса, целые диапазоны CIDR или любую их смесь через запятую:
@@ -355,6 +370,43 @@ warpscout scan -p awg -gen-i1 dns -i1-sni example.com
 В большинстве сетей сработают значения по умолчанию. Сами по себе они редко что-то разблокируют, так что всегда начинайте с `-gen-i1`.
 
 Если не хочется подбирать параметры вручную, то [`find-junk`](#шаг-3-find-junk-только-если-всё-заблокировано) перебирает комбинации, пока что-нибудь не заработает.
+
+## MASQUE
+
+Cloudflare раздаёт WARP не только по WireGuard, но и по MASQUE.
+
+```sh
+warpscout scan -p masque
+```
+
+Пулов эндпоинтов нет. MASQUE отвечает ровно на двух anycast-адресах каждого семейства - `162.159.198.1` и `162.159.198.2`, `2606:4700:103::1` и `::2` - на фиксированном наборе портов (`443 500 1701 4500 4443 8443 8095`). Скан покрывает эти адреса, умноженные на эти порты.
+
+Один и тот же `masque` эндпоинт с одним и тем же SNI может работать нестабильно, поэтому каждый эндпоинт проверяется минимум 3 раза. Это меняется флагом `-masque-attempts N`.
+
+Все эндпоинты одного прогона выходят через **одну и ту же ноду**. Какая это нода, зависит от вашей сети, а не от выбранного эндпоинта, поэтому `-node` и `-country` при `-p masque` отвергаются.
+
+### SNI
+
+У MASQUE нет ни junk-пакетов, ни `I1`. Их аналог - SNI и его смена позволяет добиться стабильной работы:
+
+```sh
+warpscout scan -p masque -masque-sni www.apple.com
+```
+
+Без указания `-masque-sni` по умолчанию используется `consumer-masque.cloudflareclient.com`. Если с ним `-p masque` ничего не нашёл, то стоит попробовать другой `-masque-sni`.
+
+### Регистрация и конфиги
+
+`warpscout register` заводит MASQUE-аккаунт рядом с аккаунтом для WireGuard/AmneziaWG, потому что одно устройство не может быть и тем и другим.
+
+`-conf` пишет `config.json` для usque, а не `.conf` и печатает команду запуска:
+
+```sh
+warpscout scan -p masque -conf usque.json
+# usque socks -c usque.json -P 8443 -s www.apple.com
+```
+
+`-table-off` и `-mtu` относятся только к форматам конфигов WireGuard и здесь игнорируются.
 
 ## Docker
 
@@ -442,5 +494,6 @@ warpscout scan -p awg -jt 6
 - [ampetelin/warp-endpoint-checker](https://github.com/ampetelin/warp-endpoint-checker) - список IPv4-подсетей WARP
 - [TheyCallMeSecond/WARP-Endpoint-IP](https://github.com/TheyCallMeSecond/WARP-Endpoint-IP) - список IPv6-подсетей WARP
 - [SagePtr/mini_quic_generator](https://github.com/SagePtr/mini_quic_generator) - сборка QUIC Initial-пакета, портированная для профиля I1 `quic`
+- [Diniboy1123/usque](https://github.com/Diniboy1123/usque) - реализация MASQUE-клиента WARP, на которой построен `-p masque`
 - [amnezia-vpn/amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) - реализация AmneziaWG в пространстве пользователя
 - [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) - фреймворк, на котором сделана живая панель
