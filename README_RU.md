@@ -78,6 +78,31 @@
 
 ## Установка
 
+### Одной командой (Linux, macOS, OpenWrt)
+
+Через curl:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
+```
+
+Через wget (на роутерах с OpenWrt curl по умолчанию нет):
+
+```sh
+wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
+```
+
+Скрипт сам подберёт архив под вашу систему и положит `warpscout` в `~/.local/bin`, а на OpenWrt - в `/usr/bin`. Скрипт можно использовать и для обновления, повторно запустив его.
+
+Опции передаются после `sh -s --`, а `INSTALL_DIR` выбирает другой каталог:
+
+```sh
+INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh)"
+
+curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --version v0.8.1
+curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --uninstall
+```
+
 ### Скачать бинарный файл
 
 Откройте самый свежий релиз на [странице релизов](https://github.com/vernette/warpscout/releases). Там лежат по одному архиву на ОС, выберите свой:
@@ -144,13 +169,14 @@ docker run --pull always --rm -it --user "$(id -u):$(id -g)" -v "$PWD:/data" ver
 
 ## Использование
 
-У WARPSCOUT три команды. Полный список флагов любой из них - `warpscout <команда> -h`.
+У WARPSCOUT четыре команды. Полный список флагов любой из них - `warpscout <команда> -h`.
 
 | Команда     | Что делает                                                    |
 | ----------- | ------------------------------------------------------------- |
 | `register`  | Создать аккаунт WARP и сохранить его. Начинать нужно с этого. |
 | `scan`      | Просканировать эндпоинты и показать рабочие.                  |
 | `find-junk` | Подобрать настройки AmneziaWG, которые проходят через фильтр. |
+| `version`   | Напечатать установленную версию одной строкой.                |
 
 ### Шаг 1: register
 

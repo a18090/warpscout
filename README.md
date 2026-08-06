@@ -78,6 +78,31 @@ Keep in mind that a single `/24` subnet can hand out several different edge node
 
 ## Install
 
+### One command (Linux, macOS, OpenWrt)
+
+With curl:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
+```
+
+With wget (OpenWrt routers have no curl by default):
+
+```sh
+wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
+```
+
+It picks the archive for your system and puts `warpscout` into `~/.local/bin`, or into `/usr/bin` on OpenWrt. Running it again is also how you update.
+
+The script takes options after `sh -s --`, and `INSTALL_DIR` picks another directory:
+
+```sh
+INSTALL_DIR=/usr/local/bin sh -c "$(curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh)"
+
+curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --version v0.8.1
+curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --uninstall
+```
+
 ### Download a binary
 
 Open the newest release on the [Releases page](https://github.com/vernette/warpscout/releases). There is one archive per OS, pick yours:
@@ -144,13 +169,14 @@ See [Docker](#docker-1) for what the flags are for.
 
 ## Usage
 
-WARPSCOUT has three commands. Run `warpscout <command> -h` for the full flag list of any of them.
+WARPSCOUT has four commands. Run `warpscout <command> -h` for the full flag list of any of them.
 
 | Command     | What it does                                             |
 | ----------- | -------------------------------------------------------- |
 | `register`  | Create a WARP account and save it. Start with this.      |
 | `scan`      | Scan endpoints and report the working ones.              |
 | `find-junk` | Search for AmneziaWG settings that get through a filter. |
+| `version`   | Print the installed version on a line of its own.        |
 
 ### Step 1: register
 
