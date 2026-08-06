@@ -322,6 +322,13 @@ warpscout scan -p awg -conf warp.conf -table-off
 warpscout scan -p awg -conf warp.conf -mtu 1280
 ```
 
+By default the generated config carries Cloudflare's resolvers - `1.1.1.1, 1.0.0.1`, or their IPv6 pair when `-6` is used. `-dns` replaces them with a comma-separated list of your own, `-no-dns` leaves the line out entirely and the client keeps the system resolvers.
+
+```sh
+warpscout scan -p awg -conf warp.conf -dns 9.9.9.9,149.112.112.112
+warpscout scan -p awg -conf warp.conf -no-dns
+```
+
 `-conf-type` picks the config format. The default `native` is the one above: a `.conf` for `wg`/`awg` and a `config.json` for `masque`, to be used with [usque](https://github.com/Diniboy1123/usque). `mihomo` writes a `proxies:` block for [mihomo](https://github.com/MetaCubeX/mihomo), which speaks both AmneziaWG and MASQUE.
 
 ```sh
@@ -406,7 +413,7 @@ warpscout scan -p masque -conf usque.json
 # usque socks -c usque.json -P 8443 -s www.apple.com
 ```
 
-`-table-off` and `-mtu` only apply to the WireGuard config formats and are ignored here.
+`-table-off`, `-mtu` and `-dns`/`-no-dns` have no counterpart in usque's `config.json` and are ignored here - under `-conf-type mihomo` the DNS flags work as usual.
 
 ## Docker
 
