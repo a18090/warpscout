@@ -274,11 +274,25 @@ func printBest(ph phaseResult) {
 }
 
 func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, run protoRun, ips []netip.Addr, timeout time.Duration, header, quitHint string) (phaseResult, error) {
+	var ph phaseResult
+	var scanErr error
+	if err := runWithUI(opts, cancel, opts.tunPingCheck, header, quitHint, func(emit emitter) {
+		ph, scanErr = runScan(ctx, opts, run, ips, timeout, emit)
+	}); err != nil {
+		return phaseResult{}, err
+	}
+	return ph, scanErr
+}
+
+// The work runs in its own goroutine and talks to the model only through the
+// emitter, so the same call drives the live dashboard or plain lines.
+func runWithUI(opts options, cancel context.CancelFunc, ping bool, header, quitHint string, work func(emitter)) error {
 	if usePlainOutput(opts) {
-		return runScan(ctx, opts, run, ips, timeout, plainEmit)
+		work(plainEmit)
+		return nil
 	}
 
-	m := newScanModel(cancel, opts.tunPingCheck)
+	m := newScanModel(cancel, ping)
 	m.header = header
 	if quitHint != "" {
 		m.quitHint = quitHint
@@ -286,19 +300,17 @@ func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, run
 	p := tea.NewProgram(m, tea.WithOutput(os.Stderr))
 	defer enableVirtualTerminal()
 
-	var ph phaseResult
-	var scanErr error
-	scanDone := make(chan struct{})
+	workDone := make(chan struct{})
 	go func() {
-		ph, scanErr = runScan(ctx, opts, run, ips, timeout, p.Send)
-		close(scanDone)
+		work(p.Send)
+		close(workDone)
 	}()
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, errPal.fail(err.Error()))
-		return phaseResult{}, err
+		return err
 	}
-	<-scanDone
-	return ph, scanErr
+	<-workDone
+	return nil
 }
 
 func usePlainOutput(opts options) bool {
