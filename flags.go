@@ -18,7 +18,7 @@ type options struct {
 	timeoutSec     int
 	perSubnet      int
 	tunPingCount   int
-	junkThreshold  int
+	threshold      int
 	mtu            int
 	proto          string
 	output         string
@@ -126,6 +126,12 @@ var (
 		{"", "threshold", "PCT", "accept a junk set once this share of sampled endpoints works"},
 	}, netSpecs...)}
 
+	findSNIGroup = flagGroup{"Search tuning", append([]flagSpec{
+		{"jt", "tunnel-jobs", "N", "tunnel workers per round"},
+		{"", "threshold", "PCT", "accept an SNI once this share of the endpoints works"},
+		{"", "masque-attempts", "N", "how many times to re-check a failing MASQUE endpoint before calling it dead"},
+	}, netSpecs...)}
+
 	findJunkI1Group = flagGroup{"AmneziaWG init packet", []flagSpec{
 		{"", "gen-i1", "PROTO", "generate the init packet per attempt: quic, dns, sip, stun or random"},
 		{"", "i1-sni", "HOST", "host to mimic in the generated I1 (default: a random well-known host)"},
@@ -219,9 +225,19 @@ func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
 	addI1GenFlags(fs, o)
 	intFlag(fs, &o.tunnelParallel, defaultTunnelJobs, "jt", "tunnel-jobs")
 	intFlag(fs, &o.perSubnet, findJunkSample, "n", "sample")
-	fs.IntVar(&o.junkThreshold, "threshold", defaultJunkThreshold, "")
+	fs.IntVar(&o.threshold, "threshold", defaultJunkThreshold, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	o.proto = protoAWG
+	o.tunPingCheck = true
+}
+
+func setupFindSNIFlags(fs *flag.FlagSet, o *options) {
+	addNetFlags(fs, o)
+	intFlag(fs, &o.tunnelParallel, masqueRoundTargets, "jt", "tunnel-jobs")
+	fs.IntVar(&o.threshold, "threshold", defaultSNIThreshold, "")
+	fs.IntVar(&masqueAttempts, "masque-attempts", masqueDefaultAttempts, "")
+	fs.BoolVar(&o.plain, "plain", false, "")
+	o.proto = protoMASQUE
 	o.tunPingCheck = true
 }
 

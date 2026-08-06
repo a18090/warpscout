@@ -74,6 +74,21 @@ var commands = []command{
 		run:    runFindJunkCmd,
 	},
 	{
+		name:  "find-sni",
+		brief: "search a MASQUE SNI that gets through this network",
+		intro: []string{
+			"Rescans the MASQUE endpoints with a different SNI each round until one",
+			"brings up the -threshold share of them, then prints the scan command to",
+			"reuse it. The candidates are a fixed list, so the search ends by itself;",
+			"Ctrl+C keeps the best SNI so far.",
+			"",
+			"Verifies by handshake and in-tunnel ping only - no exit colo is resolved.",
+		},
+		groups: []flagGroup{findSNIGroup, plainGroup},
+		setup:  setupFindSNIFlags,
+		run:    runFindSNICmd,
+	},
+	{
 		name:  "version",
 		brief: "print the warpscout version",
 		intro: []string{"Prints the version alone, so a script can compare it as is."},

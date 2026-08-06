@@ -554,6 +554,36 @@ func TestScoreJunk(t *testing.T) {
 	}
 }
 
+func TestScoreSNI(t *testing.T) {
+	ph := phaseResult{results: []endpointResult{
+		{ok: true, durable: true},
+		{ok: true, durable: true},
+		{ok: true, durable: false},
+		{},
+	}}
+	c := scoreSNI("www.apple.com", ph)
+	if c.working != 2 || c.total != 4 {
+		t.Errorf("scoreSNI() = %d/%d, want 2/4", c.working, c.total)
+	}
+	if !c.meets(50) || c.meets(51) {
+		t.Errorf("meets() at 2/4 = (%v, %v), want (true, false)", c.meets(50), c.meets(51))
+	}
+	if (sniCandidate{}).meets(1) {
+		t.Error("meets() on an empty candidate = true, want false")
+	}
+}
+
+func TestSNICommand(t *testing.T) {
+	got := sniCommand(sniCandidate{sni: "www.apple.com"})
+	if want := "scan -proto masque -masque-sni www.apple.com"; !strings.HasSuffix(got, want) {
+		t.Errorf("sniCommand() = %q, want suffix %q", got, want)
+	}
+	got = sniCommand(sniCandidate{sni: masqueDefaultSNI})
+	if want := "scan -proto masque"; !strings.HasSuffix(got, want) {
+		t.Errorf("sniCommand(default) = %q, want suffix %q", got, want)
+	}
+}
+
 func TestPeerUAPI(t *testing.T) {
 	peer, err := peerUAPI("1.2.3.4:2408")
 	if err != nil {

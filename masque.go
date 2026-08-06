@@ -65,6 +65,11 @@ var (
 // usque's own config.json has no port field at all, so it is a constant.
 var masqueEndpointPorts = []int{443, 500, 1701, 4500, 4443, 8443, 8095}
 
+// Every address times every port, the same count for either family - what one
+// find-sni round probes, and how wide its tunnel pool defaults to so the round
+// is a single batch.
+var masqueRoundTargets = len(masquePoolsV4) * len(masqueEndpointPorts)
+
 // Set by applyAccount, like warpPrivateKey for the WireGuard family.
 var masqueAcct *masqueAccount
 

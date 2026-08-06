@@ -88,9 +88,16 @@ func runRegisterCmd(ctx context.Context, opts options) error {
 	return nil
 }
 
+func validateThreshold(pct int) error {
+	if pct < 1 || pct > 100 {
+		return fmt.Errorf("-threshold (%d) must be between 1 and 100", pct)
+	}
+	return nil
+}
+
 func runFindJunkCmd(ctx context.Context, opts options) error {
-	if opts.junkThreshold < 1 || opts.junkThreshold > 100 {
-		return fmt.Errorf("-threshold (%d) must be between 1 and 100", opts.junkThreshold)
+	if err := validateThreshold(opts.threshold); err != nil {
+		return err
 	}
 	if err := loadScanAccount(opts.accountPath); err != nil {
 		return err
@@ -100,6 +107,23 @@ func runFindJunkCmd(ctx context.Context, opts options) error {
 		return err
 	}
 	return runFindJunk(ctx, opts, run, time.Duration(opts.timeoutSec)*time.Second)
+}
+
+func runFindSNICmd(ctx context.Context, opts options) error {
+	if err := validateThreshold(opts.threshold); err != nil {
+		return err
+	}
+	if err := loadScanAccount(opts.accountPath); err != nil {
+		return err
+	}
+	run, ips, err := setupScan(opts)
+	if err != nil {
+		return err
+	}
+	if masqueAcct == nil {
+		return fmt.Errorf("%s holds no MASQUE device: run \"warpscout register\" again", opts.accountPath)
+	}
+	return runFindSNI(ctx, opts, run, ips, time.Duration(opts.timeoutSec)*time.Second)
 }
 
 func runScanCmd(ctx context.Context, opts options) error {

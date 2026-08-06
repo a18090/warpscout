@@ -69,7 +69,7 @@ func runFindJunk(ctx context.Context, opts options, run protoRun, timeout time.D
 
 		c := scoreJunk(ph)
 		summary := "Attempt " + fmt.Sprint(attempt) + ": " + c.String()
-		if c.meets(opts.junkThreshold) {
+		if c.meets(opts.threshold) {
 			fmt.Fprintln(os.Stderr, errPal.ok(summary))
 		} else {
 			fmt.Fprintln(os.Stderr, errPal.dim(summary))
@@ -78,7 +78,7 @@ func runFindJunk(ctx context.Context, opts options, run protoRun, timeout time.D
 		if c.working > best.working {
 			best = c
 		}
-		if c.meets(opts.junkThreshold) {
+		if c.meets(opts.threshold) {
 			return reportJunk(c, true)
 		}
 	}
