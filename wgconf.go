@@ -19,6 +19,9 @@ func renderConf(o options, endpoint string, run protoRun) string {
 		fmt.Fprintf(&b, "Address = %s/32\n", warpAddress)
 	}
 	fmt.Fprintf(&b, "PrivateKey = %s\n", warpPrivateKey)
+	if dns := confDNS(o); dns != "" {
+		fmt.Fprintf(&b, "DNS = %s\n", dns)
+	}
 	if o.mtu > 0 {
 		fmt.Fprintf(&b, "MTU = %d\n", o.mtu)
 	}
@@ -84,15 +87,21 @@ const (
 var confTypes = []string{confTypeNative, confTypeMihomo}
 
 const (
-	mihomoDNSv4 = "[1.1.1.1, 1.0.0.1]"
-	mihomoDNSv6 = "[2606:4700:4700::1111, 2606:4700:4700::1001]"
+	warpDNSv4 = "1.1.1.1, 1.0.0.1"
+	warpDNSv6 = "2606:4700:4700::1111, 2606:4700:4700::1001"
 )
 
-func mihomoDNS(ipv6 bool) string {
-	if ipv6 {
-		return mihomoDNSv6
+func confDNS(o options) string {
+	if o.noDNS {
+		return ""
 	}
-	return mihomoDNSv4
+	if o.dns != "" {
+		return o.dns
+	}
+	if o.ipv6 {
+		return warpDNSv6
+	}
+	return warpDNSv4
 }
 
 func mihomoAddr(b *strings.Builder, v4, v6 string, ipv6 bool) {
@@ -121,8 +130,10 @@ func renderMihomoConf(o options, endpoint string, run protoRun) ([]byte, error) 
 		fmt.Fprintf(&b, "  mtu: %d\n", o.mtu)
 	}
 	fmt.Fprintf(&b, "  udp: true\n")
-	fmt.Fprintf(&b, "  remote-dns-resolve: true\n")
-	fmt.Fprintf(&b, "  dns: %s\n", mihomoDNS(o.ipv6))
+	if dns := confDNS(o); dns != "" {
+		fmt.Fprintf(&b, "  remote-dns-resolve: true\n")
+		fmt.Fprintf(&b, "  dns: [%s]\n", dns)
+	}
 
 	return []byte(b.String()), nil
 }

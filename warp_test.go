@@ -203,6 +203,7 @@ func TestRenderConf(t *testing.T) {
 		"PrivateKey = " + warpPrivateKey,
 		"Jc = 6", "Jmin = 10", "Jmax = 50",
 		"I1 = " + i1Default,
+		"DNS = " + warpDNSv6,
 		"[Peer]",
 		"PublicKey = " + warpPublicKey,
 		"Endpoint = 188.114.98.5:2408",
@@ -274,7 +275,7 @@ func TestRenderMihomoConf(t *testing.T) {
 		t.Fatal(err)
 	}
 	v6 := string(conf)
-	for _, want := range []string{"server: 2606:4700:d0::1", "ipv6: " + warpAddressV6, "allowed-ips: ['::/0']", "dns: " + mihomoDNSv6} {
+	for _, want := range []string{"server: 2606:4700:d0::1", "ipv6: " + warpAddressV6, "allowed-ips: ['::/0']", "dns: [" + warpDNSv6 + "]"} {
 		if !strings.Contains(v6, want) {
 			t.Errorf("IPv6 mihomo config missing %q:\n%s", want, v6)
 		}
@@ -289,6 +290,32 @@ func TestRenderMihomoConf(t *testing.T) {
 	}
 	if wg := string(conf); strings.Contains(wg, "amnezia-wg-option") {
 		t.Errorf("plain WireGuard config must not carry junk params:\n%s", wg)
+	}
+}
+
+func TestConfDNS(t *testing.T) {
+	wg := renderConf(options{}, "188.114.98.5:2408", protoRun{kindWG, protoWG})
+	if !strings.Contains(wg, "DNS = "+warpDNSv4) {
+		t.Errorf("default DNS missing:\n%s", wg)
+	}
+
+	custom := renderConf(options{dns: "9.9.9.9"}, "188.114.98.5:2408", protoRun{kindWG, protoWG})
+	if !strings.Contains(custom, "DNS = 9.9.9.9") || strings.Contains(custom, warpDNSv4) {
+		t.Errorf("-dns not reflected:\n%s", custom)
+	}
+
+	off := renderConf(options{noDNS: true}, "188.114.98.5:2408", protoRun{kindWG, protoWG})
+	if strings.Contains(off, "DNS = ") {
+		t.Errorf("-no-dns must drop the DNS line:\n%s", off)
+	}
+
+	conf, err := renderMihomoConf(options{confType: confTypeMihomo, noDNS: true}, "188.114.98.5:2408", protoRun{kindWG, protoWG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mihomo := string(conf)
+	if strings.Contains(mihomo, "dns:") || strings.Contains(mihomo, "remote-dns-resolve") {
+		t.Errorf("-no-dns must drop both DNS lines in mihomo:\n%s", mihomo)
 	}
 }
 

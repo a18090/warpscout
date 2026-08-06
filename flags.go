@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/netip"
 	"os"
 	"slices"
@@ -23,6 +24,7 @@ type options struct {
 	output         string
 	conf           string
 	confType       string
+	dns            string
 	proxy          string
 	freshAccount   bool
 	iface          string
@@ -38,6 +40,7 @@ type options struct {
 	best           bool
 	noReport       bool
 	tableOff       bool
+	noDNS          bool
 	i1Explicit     bool
 	tunPingCheck   bool
 	genJunk        bool
@@ -103,6 +106,8 @@ var (
 		{"", "conf-type", "KIND", "format of -conf: native (wg/awg .conf, usque config.json) or mihomo"},
 		{"", "table-off", "", "add \"Table = off\" to the generated config: bring the interface up without touching routes"},
 		{"", "mtu", "N", "set MTU in the generated config (default: leave the line out)"},
+		{"", "dns", "LIST", "DNS servers in the generated config: comma-separated (default: Cloudflare, following -6)"},
+		{"", "no-dns", "", "leave the DNS line out of the generated config"},
 		{"", "node", "COLO", "keep only endpoints landing on these edge nodes: comma-separated IATA codes"},
 		{"", "country", "ISO", "keep only endpoints whose edge node sits in these countries: comma-separated ISO codes"},
 		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
@@ -190,6 +195,8 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.IntVar(&masqueAttempts, "masque-attempts", masqueDefaultAttempts, "")
 	fs.BoolVar(&o.tableOff, "table-off", false, "")
 	fs.IntVar(&o.mtu, "mtu", 0, "")
+	fs.StringVar(&o.dns, "dns", "", "")
+	fs.BoolVar(&o.noDNS, "no-dns", false, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	fs.BoolVar(&o.emoji, "emoji", false, "")
 	o.wantMeta = true
@@ -264,6 +271,7 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	validateJunkParams()
 	validateMTU(*o)
 	validateConfType(*o)
+	applyDNS(o)
 	applyTarget(o)
 	applyNode(o)
 	rejectMasqueFilters(*o)
@@ -394,6 +402,41 @@ func validateConfType(o options) {
 		fmt.Fprintln(os.Stderr, "-table-off does not apply to -conf-type mihomo: the client owns the routes")
 		os.Exit(2)
 	}
+}
+
+func applyDNS(o *options) {
+	if o.dns == "" && !o.noDNS {
+		return
+	}
+	if o.conf == "" {
+		fmt.Fprintln(os.Stderr, "-dns and -no-dns need -conf FILE")
+		os.Exit(2)
+	}
+	if o.dns != "" && o.noDNS {
+		fmt.Fprintln(os.Stderr, "-dns and -no-dns contradict each other: drop one")
+		os.Exit(2)
+	}
+	if o.noDNS {
+		return
+	}
+
+	var servers []string
+	for _, item := range strings.Split(o.dns, ",") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if net.ParseIP(item) == nil {
+			fmt.Fprintf(os.Stderr, "-dns %q is not an IP address\n", item)
+			os.Exit(2)
+		}
+		servers = append(servers, item)
+	}
+	if len(servers) == 0 {
+		fmt.Fprintln(os.Stderr, "-dns is empty")
+		os.Exit(2)
+	}
+	o.dns = strings.Join(servers, ", ")
 }
 
 func rootUsage(w io.Writer) {
