@@ -214,15 +214,24 @@ func (m scanModel) View() string {
 	return b.String()
 }
 
+func pad(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
+
+func cappedFeed[T any](rows []T) ([]T, int) {
+	if len(rows) <= feedMax {
+		return rows, 0
+	}
+	return rows[:feedMax], len(rows) - feedMax
+}
+
+func writeFeedRest(b *strings.Builder, st conStyles, extra int) {
+	if extra > 0 {
+		b.WriteString(st.dim.Render(fmt.Sprintf("… +%d more", extra)) + "\n")
+	}
+}
+
 func (m scanModel) renderFeed() string {
 	st := m.st
-	pad := func(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
-	rows := m.feed
-	extra := 0
-	if len(rows) > feedMax {
-		extra = len(rows) - feedMax
-		rows = rows[:feedMax]
-	}
+	rows, extra := cappedFeed(m.feed)
 	tunHead := ""
 	if m.ping {
 		tunHead = pad("TUN PING", 9) + " " + pad("LOSS", 6) + " "
@@ -247,8 +256,6 @@ func (m scanModel) renderFeed() string {
 		}
 		b.WriteString(st.title.Render(ep) + " " + st.accent.Render(ping) + " " + tunSeg + exit + " " + r.colo + "\n")
 	}
-	if extra > 0 {
-		b.WriteString(st.dim.Render(fmt.Sprintf("… +%d more", extra)) + "\n")
-	}
+	writeFeedRest(&b, st, extra)
 	return b.String()
 }

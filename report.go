@@ -466,20 +466,23 @@ func uniqueSorted(working []endpointResult, key func(endpointResult) string, fla
 	return strings.Join(vals, "  ")
 }
 
-// Grouped by node, not by subnet: a single /24 can hand out several different
-// edge nodes, so a per-subnet pick would hide all but one of them.
-func writeNodePicks(w io.Writer, working []endpointResult, ping bool) {
+func nodePicks(working []endpointResult) []endpointResult {
 	byNode := make(map[string][]endpointResult)
 	for _, r := range working {
-		node := exitColo(r.exit)
-		byNode[node] = append(byNode[node], r)
+		byNode[exitColo(r.exit)] = append(byNode[exitColo(r.exit)], r)
 	}
 	picks := make([]endpointResult, 0, len(byNode))
 	for _, group := range byNode {
 		picks = append(picks, bestByPing(group))
 	}
 	sort.Slice(picks, func(i, j int) bool { return lessByLossRTT(picks[i], picks[j]) })
+	return picks
+}
 
+// Grouped by node, not by subnet: a single /24 can hand out several different
+// edge nodes, so a per-subnet pick would hide all but one of them.
+func writeNodePicks(w io.Writer, working []endpointResult, ping bool) {
+	picks := nodePicks(working)
 	fmt.Fprintf(w, "\n# Best endpoint per node (%s)\n", bestNote(ping))
 	fmt.Fprintf(w, nodePickRowFmt, "NODE", "ENDPOINT", "ENDPOINT PING", tunFields("TUN PING", "LOSS", ping), "SEEN AS", "NODE LOCATION")
 	for _, r := range picks {
