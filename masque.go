@@ -31,9 +31,10 @@ import (
 // not importable). The SNI never matches the endpoint address, which is why
 // usque pins the peer's public key instead of verifying the certificate.
 const (
-	masqueConnectURI = "https://cloudflareaccess.com"
-	masqueDefaultSNI = "consumer-masque.cloudflareclient.com"
-	masqueKeepalive  = 30 * time.Second
+	masqueConnectURI  = "https://cloudflareaccess.com"
+	masqueDefaultSNI  = "consumer-masque.cloudflareclient.com"
+	masqueKeepalive   = 30 * time.Second
+	masqueIdleTimeout = 5 * time.Second
 	// Cloudflare never signs the client certificate: it only carries the key
 	// enrolled through the API, and that enrolment is the whole authentication.
 	masqueCertLifetime = 24 * time.Hour
@@ -408,8 +409,12 @@ func (t *masqueTunnel) handshake(ctx context.Context, endpoint string, timeout t
 	}
 	dialCtx, cancelDial := context.WithTimeout(ctx, timeout)
 	defer cancelDial()
+	// A blocked endpoint completes the QUIC handshake and then never answers the
+	// CONNECT-IP request, and neither dialCtx nor HandshakeIdleTimeout ends that
+	// wait - measured, the dial returned after quic-go's own MaxIdleTimeout every
+	// time. Both are set anyway, one per stall.
 	udpConn, tr, conn, _, err := api.ConnectTunnel(dialCtx, t.tlsCfg,
-		&quic.Config{EnableDatagrams: true, KeepAlivePeriod: masqueKeepalive},
+		&quic.Config{EnableDatagrams: true, KeepAlivePeriod: masqueKeepalive, HandshakeIdleTimeout: timeout, MaxIdleTimeout: masqueIdleTimeout},
 		masqueConnectURI, udpAddr)
 	if err != nil {
 		closeMasqueTransport(udpConn, tr, nil)
