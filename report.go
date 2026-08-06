@@ -54,6 +54,7 @@ type endpointResult struct {
 	epPing   time.Duration // host ICMP ping to the bare IP, no tunnel involved
 	tunPing  time.Duration // in-tunnel RTT to pingTarget, valid only when measured
 	loss     float32       // in-tunnel packet loss 0..1, valid only when measured
+	speed    float64       // in-tunnel download Mbit/s (-speed), 0 when not measured
 	measured bool          // tunPing/loss were sampled (-tun-ping)
 	ok       bool
 	durable  bool
@@ -85,6 +86,43 @@ func tunFields(tunPing, loss string, ping bool) string {
 
 func tunFieldsOf(r endpointResult, ping bool) string {
 	return tunFields(r.tunPingStr(), r.lossStr(), ping)
+}
+
+func anySpeed(results []endpointResult) bool {
+	for _, r := range results {
+		if r.speed > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func speedStr(mbps float64) string {
+	if mbps <= 0 {
+		return "-"
+	}
+	return fmt.Sprintf("%.1f Mbps", mbps)
+}
+
+func speedField(s string, show bool) string {
+	if !show {
+		return ""
+	}
+	return fmt.Sprintf("%-11s ", s)
+}
+
+func speedCells(r endpointResult, show bool) []string {
+	if !show {
+		return nil
+	}
+	return []string{speedStr(r.speed)}
+}
+
+func speedHeaders(show bool) []string {
+	if !show {
+		return nil
+	}
+	return []string{"SPEED"}
 }
 
 func sortNote(ping bool) string {
@@ -244,16 +282,19 @@ func bestByPing(picks []endpointResult) endpointResult {
 }
 
 const (
-	reportRowFmt   = "%-22s %-13s %s%-10s %-6s %s\n"
-	nodePickRowFmt = "%-6s %-22s %-13s %s%-10s %s\n"
+	reportRowFmt   = "%-22s %-13s %s%s%-10s %-6s %s\n"
+	nodePickRowFmt = "%-6s %-22s %-13s %s%s%-10s %s\n"
 )
 
-func writeHeader(w io.Writer, working, probed int, ping bool) {
+func writeHeader(w io.Writer, working, probed int, ping, speed bool) {
 	fmt.Fprintf(w, "# WARP endpoints: %d working / %d probed\n", working, probed)
 	fmt.Fprintf(w, "# %s\n", sortNote(ping))
 	fmt.Fprintln(w, "# ENDPOINT PING = ICMP ping to the endpoint address from this host, no tunnel involved")
 	if ping {
 		fmt.Fprintf(w, "# TUN PING / LOSS = RTT and packet loss measured inside the tunnel, to %s\n", pingTarget)
+	}
+	if speed {
+		fmt.Fprintln(w, "# SPEED = download throughput measured inside the tunnel; the ordering does not depend on it")
 	}
 	fmt.Fprintln(w, "# SEEN AS = region external services see through the tunnel")
 	fmt.Fprintln(w, "# NODE / NODE LOCATION = Cloudflare WARP edge node the tunnel landed on, and where it sits")
@@ -263,7 +304,8 @@ func writeHeader(w io.Writer, working, probed int, ping bool) {
 func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 	working := workingSorted(results)
 	torn := tornSorted(results)
-	writeHeader(w, len(working), len(results), ping)
+	speed := anySpeed(results)
+	writeHeader(w, len(working), len(results), ping, speed)
 	if len(working) == 0 && len(torn) == 0 {
 		fmt.Fprintln(w, "\nNo working endpoints found.")
 		return
@@ -271,21 +313,21 @@ func writeFullReport(w io.Writer, results []endpointResult, ping bool) {
 
 	if len(working) > 0 {
 		fmt.Fprintln(w)
-		writeRows(w, working, ping)
+		writeRows(w, working, ping, speed)
 	}
 	if len(torn) > 0 {
 		fmt.Fprintf(w, "\n# %d torn down (handshake ok, data flowed, then cut and never recovered)\n", len(torn))
-		writeRows(w, torn, ping)
+		writeRows(w, torn, ping, speed)
 	}
 	if len(working) > 0 {
-		writeNodePicks(w, working, ping)
+		writeNodePicks(w, working, ping, speed)
 	}
 }
 
-func writeRows(w io.Writer, results []endpointResult, ping bool) {
-	fmt.Fprintf(w, reportRowFmt, "ENDPOINT", "ENDPOINT PING", tunFields("TUN PING", "LOSS", ping), "SEEN AS", "NODE", "NODE LOCATION")
+func writeRows(w io.Writer, results []endpointResult, ping, speed bool) {
+	fmt.Fprintf(w, reportRowFmt, "ENDPOINT", "ENDPOINT PING", tunFields("TUN PING", "LOSS", ping), speedField("SPEED", speed), "SEEN AS", "NODE", "NODE LOCATION")
 	for _, r := range results {
-		fmt.Fprintf(w, reportRowFmt, r.endpoint, r.epPingStr(), tunFieldsOf(r, ping), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
+		fmt.Fprintf(w, reportRowFmt, r.endpoint, r.epPingStr(), tunFieldsOf(r, ping), speedField(speedStr(r.speed), speed), exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
 	}
 }
 
@@ -374,37 +416,39 @@ func tunHeaders(ping bool) []string {
 	return []string{"TUN PING", "LOSS"}
 }
 
-func metricCols(ping bool, pingCol int) map[int]bool {
-	cols := map[int]bool{pingCol: true}
-	if ping {
-		cols[pingCol+1] = true
-		cols[pingCol+2] = true
+func metricCols(first, n int) map[int]bool {
+	cols := make(map[int]bool, n)
+	for i := 0; i < n; i++ {
+		cols[first+i] = true
 	}
 	return cols
 }
 
 func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, ping bool) {
+	speed := anySpeed(working) || anySpeed(torn)
+	metrics := func(r endpointResult) []string {
+		return append(tunCells(r, ping), speedCells(r, speed)...)
+	}
+
 	var rows []pickRow
 	for _, p := range pools {
 		subnet := p.String()
 		if picks := subnetEndpoints(working, p); len(picks) > 0 {
 			r := bestByPing(picks)
-			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, tunCells(r, ping)...)
+			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, metrics(r)...)
 			cells = append(cells, exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
 			rows = append(rows, pickRow{cells, statusOK, r.loss, r.sortPing()})
 			continue
 		}
 		if picks := subnetEndpoints(torn, p); len(picks) > 0 {
 			r := bestByPing(picks)
-			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, tunCells(r, ping)...)
+			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, metrics(r)...)
 			cells = append(cells, "torn down", "", "")
 			rows = append(rows, pickRow{cells, statusTorn, r.loss, r.sortPing()})
 			continue
 		}
 		cells := []string{subnet, "no working endpoints", ""}
-		if ping {
-			cells = append(cells, "", "")
-		}
+		cells = append(cells, make([]string, len(tunHeaders(ping))+len(speedHeaders(speed)))...)
 		cells = append(cells, "", "", "")
 		rows = append(rows, pickRow{cells, statusNone, 0, 0})
 	}
@@ -413,8 +457,9 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 	})
 
 	headers := append([]string{"SUBNET", "ENDPOINT", "ENDPOINT PING"}, tunHeaders(ping)...)
+	headers = append(headers, speedHeaders(speed)...)
 	headers = append(headers, "SEEN AS", "NODE", "NODE LOCATION")
-	accentCols := metricCols(ping, 2)
+	accentCols := metricCols(2, 1+len(tunHeaders(ping))+len(speedHeaders(speed)))
 
 	fmt.Fprintln(w, "\n"+st.title.Render("Best endpoint per subnet ("+bestNote(ping)+")"))
 	t := table.New().
@@ -479,14 +524,34 @@ func nodePicks(working []endpointResult) []endpointResult {
 	return picks
 }
 
-// Grouped by node, not by subnet: a single /24 can hand out several different
-// edge nodes, so a per-subnet pick would hide all but one of them.
-func writeNodePicks(w io.Writer, working []endpointResult, ping bool) {
+func speedTargets(results []endpointResult) []endpointResult {
+	working := workingSorted(results)
+	seen := make(map[string]bool, len(pools))
+	var out []endpointResult
+	add := func(r endpointResult) {
+		if !seen[r.endpoint] {
+			seen[r.endpoint] = true
+			out = append(out, r)
+		}
+	}
+	for _, p := range pools {
+		if picks := subnetEndpoints(working, p); len(picks) > 0 {
+			add(bestByPing(picks))
+		}
+	}
+	for _, r := range nodePicks(working) {
+		add(r)
+	}
+	sort.Slice(out, func(i, j int) bool { return lessByLossRTT(out[i], out[j]) })
+	return out
+}
+
+func writeNodePicks(w io.Writer, working []endpointResult, ping, speed bool) {
 	picks := nodePicks(working)
 	fmt.Fprintf(w, "\n# Best endpoint per node (%s)\n", bestNote(ping))
-	fmt.Fprintf(w, nodePickRowFmt, "NODE", "ENDPOINT", "ENDPOINT PING", tunFields("TUN PING", "LOSS", ping), "SEEN AS", "NODE LOCATION")
+	fmt.Fprintf(w, nodePickRowFmt, "NODE", "ENDPOINT", "ENDPOINT PING", tunFields("TUN PING", "LOSS", ping), speedField("SPEED", speed), "SEEN AS", "NODE LOCATION")
 	for _, r := range picks {
-		fmt.Fprintf(w, nodePickRowFmt, exitColo(r.exit), r.endpoint, r.epPingStr(), tunFieldsOf(r, ping), exitRegion(r.exit), exitColoLocation(r.exit))
+		fmt.Fprintf(w, nodePickRowFmt, exitColo(r.exit), r.endpoint, r.epPingStr(), tunFieldsOf(r, ping), speedField(speedStr(r.speed), speed), exitRegion(r.exit), exitColoLocation(r.exit))
 	}
 }
 

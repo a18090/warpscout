@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"net"
 	"net/http"
 	"net/netip"
@@ -201,6 +202,57 @@ func (s *ipStack) fetch(ctx context.Context, timeout time.Duration) (string, boo
 	}
 	s.client.Timeout = timeout
 	return fetchMeta(reqCtx, s.client, metaURL)
+}
+
+func (s *ipStack) speedTest(ctx context.Context) (float64, bool) {
+	reqCtx, cancel := context.WithTimeout(ctx, speedTimeout)
+	defer cancel()
+	if !resolveMetaAddr(reqCtx, s.tnet) {
+		return 0, false
+	}
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, speedURL, nil)
+	if err != nil {
+		return 0, false
+	}
+	req.Header.Set("Referer", metaReferer)
+
+	s.client.Timeout = speedTimeout
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return 0, false
+	}
+	defer resp.Body.Close()
+	return sampleThroughput(resp.Body)
+}
+
+func sampleThroughput(body io.Reader) (float64, bool) {
+	buf := make([]byte, 64<<10)
+	var got int64
+	var start time.Time
+	for {
+		n, err := body.Read(buf)
+		got += int64(n)
+		if start.IsZero() && got >= speedWarmupBytes {
+			got, start = 0, time.Now()
+		}
+		if err != nil {
+			break
+		}
+		if !start.IsZero() && time.Since(start) >= speedSample {
+			break
+		}
+	}
+	if start.IsZero() || got == 0 {
+		return 0, false
+	}
+	return mbits(got, time.Since(start)), true
+}
+
+func mbits(bytes int64, d time.Duration) float64 {
+	if d <= 0 || bytes <= 0 {
+		return 0
+	}
+	return float64(bytes) * 8 / 1e6 / d.Seconds()
 }
 
 var (

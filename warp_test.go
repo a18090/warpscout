@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"math"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -876,6 +877,113 @@ func TestNoEndpointMsg(t *testing.T) {
 	}
 }
 
+func TestMbits(t *testing.T) {
+	cases := []struct {
+		bytes int64
+		d     time.Duration
+		want  float64
+	}{
+		{1_250_000, time.Second, 10},
+		{5 << 20, 4 * time.Second, 10.485760},
+		{1000, 0, 0},
+		{0, time.Second, 0},
+	}
+	for _, c := range cases {
+		if got := mbits(c.bytes, c.d); math.Abs(got-c.want) > 0.0001 {
+			t.Errorf("mbits(%d, %v) = %v, want %v", c.bytes, c.d, got, c.want)
+		}
+	}
+}
+
+func TestReportSpeedColumn(t *testing.T) {
+	r := endpointResult{endpoint: "1.2.3.4:2408", speed: 42.5, ok: true, durable: true}
+	if !anySpeed([]endpointResult{{}, r}) {
+		t.Error("anySpeed missed a measured endpoint")
+	}
+	if anySpeed([]endpointResult{{}, {endpoint: "5.6.7.8:2408"}}) {
+		t.Error("anySpeed reported an unmeasured set as measured")
+	}
+	if got := speedStr(0); got != "-" {
+		t.Errorf("speedStr(0) = %q, want %q", got, "-")
+	}
+
+	var withSpeed bytes.Buffer
+	writeRows(&withSpeed, []endpointResult{r}, false, true)
+	for _, want := range []string{"SPEED", "42.5 Mbps"} {
+		if !strings.Contains(withSpeed.String(), want) {
+			t.Errorf("-speed report is missing %q:\n%s", want, withSpeed.String())
+		}
+	}
+
+	var noSpeed bytes.Buffer
+	writeRows(&noSpeed, []endpointResult{r}, false, false)
+	if strings.Contains(noSpeed.String(), "SPEED") || strings.Contains(noSpeed.String(), "42.5") {
+		t.Errorf("report without -speed leaks the column:\n%s", noSpeed.String())
+	}
+}
+
+func TestSpeedTargets(t *testing.T) {
+	defer func(saved []netip.Prefix) { pools = saved }(pools)
+	pools, _ = parseTargets("8.47.69.0/24,188.114.96.0/24")
+
+	ok := func(addr string, ms int, colo string) endpointResult {
+		return endpointResult{
+			ip:       netip.MustParseAddr(addr),
+			endpoint: addr + ":2408",
+			epPing:   time.Duration(ms) * time.Millisecond,
+			exit:     metaResult{colo: colo},
+			ok:       true,
+			durable:  true,
+		}
+	}
+	results := []endpointResult{
+		ok("8.47.69.10", 3, "DME"),    // subnet pick, and the DME node pick - counted once
+		ok("8.47.69.11", 9, "FRA"),    // not its subnet's pick, but it is the FRA node pick
+		ok("188.114.96.5", 40, "FRA"), // subnet pick only
+		ok("188.114.96.6", 41, "FRA"), // shown by neither table
+		{endpoint: "8.47.69.12:2408", ip: netip.MustParseAddr("8.47.69.12")}, // not working
+	}
+
+	var got []string
+	for _, r := range speedTargets(results) {
+		got = append(got, r.endpoint)
+	}
+	want := []string{"8.47.69.10:2408", "8.47.69.11:2408", "188.114.96.5:2408"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("speedTargets = %v, want %v", got, want)
+	}
+}
+
+func TestFastestNote(t *testing.T) {
+	got := fastestNote(map[string]float64{"a:2408": 90.4, "b:2408": 310.2, "c:2408": 0})
+	if want := "fastest 310.2 Mbps at b:2408"; got != want {
+		t.Errorf("fastestNote = %q, want %q", got, want)
+	}
+	if got := fastestNote(map[string]float64{"a:2408": 0}); got != "nothing measured" {
+		t.Errorf("fastestNote with no measurement = %q", got)
+	}
+}
+
+func TestShowsSpeed(t *testing.T) {
+	cases := []struct {
+		name string
+		opts options
+		want bool
+	}{
+		{"tables", options{}, true},
+		{"best alone", options{best: true}, false},
+		{"conf file", options{conf: "wg.conf"}, true},
+		{"conf stdout", options{conf: confStdout}, false},
+		{"best with report file", options{best: true, output: "r.txt"}, true},
+		{"best with report file but no-report", options{best: true, output: "r.txt", noReport: true}, false},
+	}
+	for _, c := range cases {
+		if got := showsSpeed(c.opts); got != c.want {
+			t.Errorf("%s: showsSpeed = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 func TestReportPingColumns(t *testing.T) {
 	r := endpointResult{
 		endpoint: "1.2.3.4:2408",
@@ -888,7 +996,7 @@ func TestReportPingColumns(t *testing.T) {
 	}
 
 	var withPing bytes.Buffer
-	writeRows(&withPing, []endpointResult{r}, true)
+	writeRows(&withPing, []endpointResult{r}, true, false)
 	for _, want := range []string{"ENDPOINT PING", "TUN PING", "LOSS", "30ms", "90ms", "10%"} {
 		if !strings.Contains(withPing.String(), want) {
 			t.Errorf("-tun-ping report is missing %q:\n%s", want, withPing.String())
@@ -896,7 +1004,7 @@ func TestReportPingColumns(t *testing.T) {
 	}
 
 	var noPing bytes.Buffer
-	writeRows(&noPing, []endpointResult{r}, false)
+	writeRows(&noPing, []endpointResult{r}, false, false)
 	for _, unwanted := range []string{"TUN PING", "LOSS", "90ms", "10%"} {
 		if strings.Contains(noPing.String(), unwanted) {
 			t.Errorf("report without -tun-ping leaks %q:\n%s", unwanted, noPing.String())

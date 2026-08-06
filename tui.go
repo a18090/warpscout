@@ -34,6 +34,10 @@ type (
 		colo     string
 		torn     bool
 	}
+	speedMsg struct {
+		endpoint string
+		mbps     float64
+	}
 	barEndMsg struct{ label, summary string }
 	doneMsg   struct{}
 )
@@ -53,6 +57,8 @@ func plainEmit(msg tea.Msg) {
 		}
 	case barBeginMsg:
 		fmt.Fprintf(os.Stderr, "%s: %d...\n", m.label, m.total)
+	case speedMsg:
+		fmt.Fprintf(os.Stderr, "  %-22s %s\n", m.endpoint, speedStr(m.mbps))
 	case barEndMsg:
 		fmt.Fprintf(os.Stderr, "%s: %s\n", m.label, m.summary)
 	}
@@ -69,12 +75,13 @@ type scanModel struct {
 	spin     spinner.Model
 	bar      progress.Model
 
-	lines []string
-	step  string
-	label string
-	total int
-	done  int
-	feed  []foundMsg
+	lines  []string
+	step   string
+	label  string
+	total  int
+	done   int
+	feed   []foundMsg
+	speeds []speedMsg
 
 	finished bool
 }
@@ -135,6 +142,11 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case foundMsg:
 		m.feed = append(m.feed, msg)
 		sort.SliceStable(m.feed, func(i, j int) bool { return lessLatency(m.feed[i], m.feed[j]) })
+		return m, nil
+
+	case speedMsg:
+		m.speeds = append(m.speeds, msg)
+		sort.SliceStable(m.speeds, func(i, j int) bool { return m.speeds[i].mbps > m.speeds[j].mbps })
 		return m, nil
 
 	case barEndMsg:
@@ -208,6 +220,9 @@ func (m scanModel) View() string {
 	if len(m.feed) > 0 {
 		b.WriteString("\n" + m.renderFeed())
 	}
+	if len(m.speeds) > 0 {
+		b.WriteString("\n" + m.renderSpeeds())
+	}
 	if !m.finished {
 		b.WriteString("\n" + st.dim.Render(m.quitHint) + "\n")
 	}
@@ -215,6 +230,22 @@ func (m scanModel) View() string {
 }
 
 func pad(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
+
+func (m scanModel) renderSpeeds() string {
+	st := m.st
+	rows, extra := cappedFeed(m.speeds)
+	var b strings.Builder
+	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" SPEED") + "\n")
+	for _, r := range rows {
+		style := st.accent
+		if r.mbps <= 0 {
+			style = st.warn
+		}
+		b.WriteString(st.title.Render(pad(r.endpoint, 22)) + " " + style.Render(speedStr(r.mbps)) + "\n")
+	}
+	writeFeedRest(&b, st, extra)
+	return b.String()
+}
 
 func cappedFeed[T any](rows []T) ([]T, int) {
 	if len(rows) <= feedMax {

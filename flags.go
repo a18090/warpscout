@@ -43,6 +43,7 @@ type options struct {
 	noDNS          bool
 	i1Explicit     bool
 	tunPingCheck   bool
+	speed          bool
 	genJunk        bool
 	wantMeta       bool
 	ipv6           bool
@@ -76,6 +77,7 @@ var (
 		{"jt", "tunnel-jobs", "N", "phase 2 tunnel workers"},
 		{"P", "tun-ping", "", fmt.Sprintf("add the TUN PING/LOSS columns: RTT and packet loss measured inside the tunnel to %s, and flag endpoints DPI tears down mid-stream; off by default for speed", pingTarget)},
 		{"", "tun-ping-count", "N", fmt.Sprintf("echoes per durability burst, %dms apart - a longer burst catches tunnels DPI kills late (default %d, implies -tun-ping)", pingInterval.Milliseconds(), durabilityPings)},
+		{"", "speed", "", "add the SPEED column: after the scan, download-test every endpoint the tables pick, one at a time (slow, and it does not change the ranking)"},
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 	}, netSpecs...)}
@@ -191,6 +193,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.BoolVar(&o.noReport, "no-report", false, "")
 	boolFlag(fs, &o.tunPingCheck, "P", "tun-ping")
 	fs.IntVar(&o.tunPingCount, "tun-ping-count", 0, "")
+	fs.BoolVar(&o.speed, "speed", false, "")
 	boolFlag(fs, &o.full, "f", "full")
 	fs.StringVar(&o.node, "node", "", "")
 	fs.StringVar(&o.country, "country", "", "")

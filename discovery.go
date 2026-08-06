@@ -20,7 +20,14 @@ const (
 	metaHost = "speed.cloudflare.com"
 	metaURL  = "https://" + metaHost + "/meta"
 	// Without a Referer the endpoint answers 403.
-	metaReferer = "https://" + metaHost
+	metaReferer      = "https://" + metaHost
+	speedURL         = "https://" + metaHost + "/__down?bytes=104857600"
+	speedWarmupBytes = 1 << 20
+	speedSample      = 3 * time.Second
+	speedTimeout     = 20 * time.Second
+	speedDrain       = 250 * time.Millisecond
+	// GOGC for the speedtest phase only, see measureSpeed.
+	speedGCPercent = 20
 )
 
 func fetchMeta(ctx context.Context, client *http.Client, url string) (string, bool) {

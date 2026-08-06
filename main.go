@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -162,6 +163,12 @@ func runScanCmd(ctx context.Context, opts options) error {
 		return fmt.Errorf("%s", noEndpointMsg(opts))
 	}
 
+	if opts.speed && showsSpeed(opts) {
+		runWithUI(opts, cancel, false, "", "q to skip the rest", func(emit emitter) {
+			measureSpeed(ctx, ph, time.Duration(opts.timeoutSec)*time.Second, emit)
+		})
+	}
+
 	switch {
 	case opts.best:
 		printBest(ph)
@@ -190,6 +197,79 @@ func runScanCmd(ctx context.Context, opts options) error {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
 	}
 	return nil
+}
+
+func showsSpeed(opts options) bool {
+	if !opts.best && opts.conf != confStdout {
+		return true
+	}
+	return !opts.noReport && opts.output != ""
+}
+
+func measureSpeed(ctx context.Context, ph phaseResult, timeout time.Duration, emit emitter) {
+	picks := speedTargets(ph.results)
+	const label = "Speedtest phase: measuring picked endpoints one at a time"
+	emit(barBeginMsg{label: label, total: len(picks)})
+
+	prevGC := debug.SetGCPercent(speedGCPercent)
+	defer debug.SetGCPercent(prevGC)
+
+	tn, err := newTunnel(ph.run)
+	if err != nil {
+		emit(stepMsg{fail: true, summary: fmt.Sprintf("speedtest failed: %v", err)})
+		return
+	}
+	defer closeAfterDrain(tn)
+
+	speeds := make(map[string]float64, len(picks))
+	for _, p := range picks {
+		if ctx.Err() != nil {
+			break
+		}
+		speeds[p.endpoint] = endpointSpeed(ctx, tn, p.endpoint, timeout)
+		emit(speedMsg{endpoint: p.endpoint, mbps: speeds[p.endpoint]})
+		emit(probedMsg{})
+	}
+	for i, r := range ph.results {
+		ph.results[i].speed = speeds[r.endpoint]
+	}
+
+	emit(barEndMsg{label: label, summary: fastestNote(speeds)})
+	emit(doneMsg{})
+}
+
+func fastestNote(speeds map[string]float64) string {
+	var endpoint string
+	var best float64
+	for ep, mbps := range speeds {
+		if mbps > best {
+			best, endpoint = mbps, ep
+		}
+	}
+	if endpoint == "" {
+		return "nothing measured"
+	}
+	return fmt.Sprintf("fastest %s at %s", speedStr(best), endpoint)
+}
+
+func closeAfterDrain(tn tunnel) {
+	time.Sleep(speedDrain)
+	tn.Close()
+}
+
+func endpointSpeed(ctx context.Context, tn tunnel, endpoint string, timeout time.Duration) float64 {
+	for attempt := 0; attempt < max(tn.attempts(), 1); attempt++ {
+		if ctx.Err() != nil {
+			break
+		}
+		if !tn.handshake(ctx, endpoint, timeout) {
+			continue
+		}
+		if mbps, ok := tn.stack().speedTest(ctx); ok {
+			return mbps
+		}
+	}
+	return 0
 }
 
 func anyEndpoint(ph phaseResult) bool {
@@ -284,8 +364,6 @@ func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, run
 	return ph, scanErr
 }
 
-// The work runs in its own goroutine and talks to the model only through the
-// emitter, so the same call drives the live dashboard or plain lines.
 func runWithUI(opts options, cancel context.CancelFunc, ping bool, header, quitHint string, work func(emitter)) error {
 	if usePlainOutput(opts) {
 		work(plainEmit)
