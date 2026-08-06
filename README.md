@@ -253,6 +253,7 @@ Results are sorted by packet loss first, then by ping, so the top row is the bes
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `-P, -tun-ping`     | Add the `TUN PING` and `LOSS` columns - RTT and packet loss measured inside the tunnel - and flag endpoints DPI tears down mid-stream. Off by default, since it takes longer. |
 | `-tun-ping-count N` | How many echoes per endpoint (default 10, minimum 5). Implies `-tun-ping`. The longer the burst, the more reliably it catches tunnels torn down a second or two in.           |
+| `-speed`            | Add the `SPEED` column: after the scan, download-test every endpoint the tables pick, one at a time. Kinda slow, and it does not change the ranking - see below.                    |
 | `-n, -sample N`     | Addresses to try per subnet (default 5).                                                                                                                                     |
 | `-f, -full`         | Try all 256 addresses of every subnet. Slow but thorough.                                                                                                                    |
 | `-jt N`             | How many tunnels to run at once (default 10).                                                                                                                                |
@@ -276,6 +277,18 @@ There are two pings, and they sit in separate columns:
 The two are never compared against each other. One of them ranks the whole table: with `-tun-ping` that is loss first, then `TUN PING`, without it only `ENDPOINT PING`.
 
 `ENDPOINT PING` opens an ICMP socket and shows `?` without the right permission (see [Troubleshooting](#troubleshooting)); `TUN PING` runs inside the userspace tunnel and needs no privileges at all.
+
+#### Throughput: `-speed`
+
+`-speed` adds a `SPEED` column with the download throughput measured inside the tunnel:
+
+```sh
+warpscout scan -p awg -P -speed
+```
+
+It is a phase of its own - `Speedtest phase` in the live dashboard, right after the scan is over - and it measures **one endpoint at a time**: `-jt` tunnels downloading at once would measure your uplink divided by `-jt` rather than the endpoint. Measured are exactly the endpoints the output picks - the best of each subnet in the console table, plus the best of each edge node in the report file. Every other row keeps a `-`, and the phase costs roughly three seconds per picked endpoint.
+
+The ranking does not change. Sorting stays on loss and ping, and `-best`/`-conf` pick the same endpoint they would without the flag - the speed is there to look at, not to rank by. With `-best` or `-conf -` and no report file, the phase is skipped entirely: there would be nowhere to show the column.
 
 The report file is a flat list: a commented header, then every working endpoint, then the torn-down ones, and the best endpoint of each edge node at the end. Easy to process with scripts.
 
