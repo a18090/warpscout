@@ -471,7 +471,11 @@ func commandUsage(w io.Writer, cmd command, fs *flag.FlagSet) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, st.title.Render("Usage:"))
-	fmt.Fprintf(w, "  %s [options]\n", st.accent.Render("warpscout "+cmd.name))
+	args := " [options]"
+	if len(cmd.groups) == 0 {
+		args = ""
+	}
+	fmt.Fprintf(w, "  %s%s\n", st.accent.Render("warpscout "+cmd.name), args)
 
 	col := flagColumnWidth(cmd.groups)
 	for _, g := range cmd.groups {

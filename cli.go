@@ -73,6 +73,13 @@ var commands = []command{
 		setup:  setupFindJunkFlags,
 		run:    runFindJunkCmd,
 	},
+	{
+		name:  "version",
+		brief: "print the warpscout version",
+		intro: []string{"Prints the version alone, so a script can compare it as is."},
+		setup: func(*flag.FlagSet, *options) {},
+		run:   runVersionCmd,
+	},
 }
 
 func main() {
