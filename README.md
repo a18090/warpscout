@@ -531,11 +531,25 @@ sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
 
 Neither is a code change, and nothing breaks without them: the column simply shows `?`, and with `-tun-ping` the ranking still has `TUN PING` to work with.
 
-**The tool gets killed on a small router.** On a 256 MB device the default `-jt 10` can run the box out of memory. Values between 4 and 8 are safe:
+**The tool gets killed on a small router.** This is the kernel OOM killer, so the shell reports a bare `SIGKILL` and the tool itself prints nothing. `dmesg`, or `logread` on OpenWrt, confirms it:
+
+```
+Out of memory: Killed process 4650 (warpscout) total-vm:1570964kB, anon-rss:176768kB
+```
+
+Lowering `-jt` is one way out - it cuts how many tunnels run at once, at the price of a slower scan. Values between 4 and 8 are safe on a 256 MB device:
 
 ```sh
 warpscout scan -p awg -jt 6
 ```
+
+`GOMEMLIMIT` is the other, and it keeps the concurrency: it caps the memory the Go runtime may hold, and the GC then works harder to stay inside that budget.
+
+```sh
+GOMEMLIMIT=8MiB warpscout scan -p awg -gen-i1 quic -f
+```
+
+The value looks absurdly small because it is a [soft limit](https://pkg.go.dev/runtime#hdr-Environment_Variables) on the heap and the rest of the runtime's memory, not on the process: the mapping of the binary and the buffers the kernel holds for the sockets sit outside it. On a 484 MB OpenWrt router a `-f` scan passed 120 MB of RSS within 35 seconds unrestricted, and stayed near 61 MB with `GOMEMLIMIT=8MiB`. The trade is CPU - the tighter the limit, the more often the GC runs.
 
 **macOS refuses to start the binary.** Remove the quarantine flag - see [Install](#install).
 
