@@ -449,6 +449,13 @@ warpscout find-sni
 
 It stops as soon as one SNI brings up the `-threshold` share of the endpoints (70% by default), and Ctrl+C keeps the best one found so far. Like `find-junk`, it only checks the handshake and the in-tunnel ping, so no exit region or node is resolved.
 
+An SNI does not carry over between the two transports - one that works over QUIC can be dead over TCP - so `-p` picks which one to search, and the command it prints names it:
+
+```sh
+warpscout find-sni -p masque-h2
+# warpscout scan -proto masque-h2 -masque-sni www.apple.com
+```
+
 ### HTTP/2
 
 Cloudflare also carries MASQUE over TCP instead of QUIC, and that transport is a separate protocol here:
