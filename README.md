@@ -237,7 +237,7 @@ warpscout register -x socks5://127.0.0.1:1080
 warpscout scan -p awg
 ```
 
-`-p/-proto` picks the protocol: `wg` (the default), `awg` or `masque`. On networks that filter VPN traffic, plain `wg` usually fails everywhere, so reach for `awg` or `masque` straight away, see [MASQUE](#masque).
+`-p/-proto` picks the protocol: `wg` (the default), `awg`, `masque` (CONNECT-IP over QUIC) or `masque-h2` (the same over TCP). On networks that filter VPN traffic, plain `wg` usually fails everywhere, so reach for `awg` or `masque` straight away, see [MASQUE](#masque).
 
 If `-p awg` turns up no working endpoint, the next thing to change is the fake first packet (`I1`), not the junk parameters:
 
@@ -449,16 +449,33 @@ warpscout find-sni
 
 It stops as soon as one SNI brings up the `-threshold` share of the endpoints (70% by default), and Ctrl+C keeps the best one found so far. Like `find-junk`, it only checks the handshake and the in-tunnel ping, so no exit region or node is resolved.
 
+### HTTP/2
+
+Cloudflare also carries MASQUE over TCP instead of QUIC, and that transport is a separate protocol here:
+
+```sh
+warpscout scan -p masque-h2 -masque-sni www.apple.com
+```
+
+Everything else stays the same - same account, same ports, same SNI knob, same `-node`/`-country` rejection - but the endpoints are no longer two addresses: the whole of `162.159.198.0/24` and `162.159.199.0/24` answers, so `-n`/`-f` decide how much of it a run covers.
+
+Under `-6` the pool is `2606:4700:103::/120`.
+
 ### Registration and configs
 
-`warpscout register` sets up a MASQUE account alongside the WireGuard/AmneziaWG one, because a single device cannot be both.
+`warpscout register` sets up a MASQUE account alongside the WireGuard/AmneziaWG one, because a single device cannot be both. The same account serves `masque` and `masque-h2`.
 
 `-conf` writes a usque `config.json` rather than a `.conf`, and prints the command to run it:
 
 ```sh
 warpscout scan -p masque -conf usque.json
 # usque socks -c usque.json -P 8443 -s www.apple.com
+
+warpscout scan -p masque-h2 -conf usque.json
+# usque socks -c usque.json -P 1701 -s www.apple.com --http2
 ```
+
+A `masque-h2` run fills usque's `endpoint_h2_v4`/`endpoint_h2_v6` fields. `-conf-type mihomo` works for both MASQUE modes: the TCP one is the same `type: masque` with `network: h2`.
 
 `-table-off`, `-mtu` and `-dns`/`-no-dns` have no counterpart in usque's `config.json` and are ignored here - under `-conf-type mihomo` the DNS flags work as usual.
 
