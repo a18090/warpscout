@@ -537,19 +537,13 @@ Neither is a code change, and nothing breaks without them: the column simply sho
 Out of memory: Killed process 4650 (warpscout) total-vm:1570964kB, anon-rss:176768kB
 ```
 
-Lowering `-jt` is one way out - it cuts how many tunnels run at once, at the price of a slower scan. Values between 4 and 8 are safe on a 256 MB device:
-
-```sh
-warpscout scan -p awg -jt 6
-```
-
-`GOMEMLIMIT` is the other, and it keeps the concurrency: it caps the memory the Go runtime may hold, and the GC then works harder to stay inside that budget.
+Cap the memory the Go runtime is allowed to hold, and the GC keeps the scan inside that budget:
 
 ```sh
 GOMEMLIMIT=8MiB warpscout scan -p awg -gen-i1 quic -f
 ```
 
-The value looks absurdly small because it is a [soft limit](https://pkg.go.dev/runtime#hdr-Environment_Variables) on the heap and the rest of the runtime's memory, not on the process: the mapping of the binary and the buffers the kernel holds for the sockets sit outside it. On a 484 MB OpenWrt router a `-f` scan passed 120 MB of RSS within 35 seconds unrestricted, and stayed near 61 MB with `GOMEMLIMIT=8MiB`. The trade is CPU - the tighter the limit, the more often the GC runs.
+`8MiB` is a deliberate low end rather than an arbitrary one: below roughly `32MiB` the peak follows the limit, above it the GC fires early on its own and nothing improves, and a scan takes the same wall time across the whole range - so there is nothing to buy by loosening it. The limit is [soft](https://pkg.go.dev/runtime#hdr-Environment_Variables) and covers the heap and the rest of the runtime's memory, not the process: the mapping of the binary and the buffers the kernel holds for the sockets sit outside it. On a 484 MB OpenWrt router that put the peak near 61 MB, against 120 MB within 35 seconds unrestricted.
 
 **macOS refuses to start the binary.** Remove the quarantine flag - see [Install](#install).
 
