@@ -3,7 +3,9 @@ name: test
 on:
   push:
     branches: [master]
+    paths-ignore: ["**.md", "LICENSE*"]
   pull_request:
+    paths-ignore: ["**.md", "LICENSE*"]
   workflow_dispatch:
 
 permissions:
