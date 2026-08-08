@@ -112,6 +112,21 @@ func mihomoAddr(b *strings.Builder, v4, v6 string, ipv6 bool) {
 	fmt.Fprintf(b, "  ip: %s\n", v4)
 }
 
+// mihomo lists proxies by name, so several warpscout configs pasted into one
+// file have to differ by protocol. The endpoint address stays out of it: the run
+// already picked the single best one, and the name would go stale on the next scan.
+func mihomoName(run protoRun) string {
+	switch run.kind {
+	case kindAWG:
+		return "AWG WARP"
+	case kindMASQUE:
+		return "MASQUE H3 WARP"
+	case kindMASQUEH2:
+		return "MASQUE H2 WARP"
+	}
+	return "WG WARP"
+}
+
 func renderMihomoConf(o options, endpoint string, run protoRun) ([]byte, error) {
 	host, port, err := net.SplitHostPort(endpoint)
 	if err != nil {
@@ -120,7 +135,7 @@ func renderMihomoConf(o options, endpoint string, run protoRun) ([]byte, error) 
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "proxies:\n")
-	fmt.Fprintf(&b, "- name: \"WARP %s\"\n", endpoint)
+	fmt.Fprintf(&b, "- name: \"%s\"\n", mihomoName(run))
 	fmt.Fprintf(&b, "  server: %s\n", host)
 	fmt.Fprintf(&b, "  port: %s\n", port)
 	if err := mihomoPeer(&b, run, o.ipv6); err != nil {

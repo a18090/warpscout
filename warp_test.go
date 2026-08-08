@@ -246,7 +246,7 @@ func TestRenderMihomoConf(t *testing.T) {
 	awg := string(conf)
 	for _, want := range []string{
 		"proxies:",
-		"- name: \"WARP 188.114.98.5:2408\"",
+		"- name: \"AWG WARP\"",
 		"server: 188.114.98.5",
 		"port: 2408",
 		"type: wireguard",
@@ -291,6 +291,24 @@ func TestRenderMihomoConf(t *testing.T) {
 	}
 	if wg := string(conf); strings.Contains(wg, "amnezia-wg-option") {
 		t.Errorf("plain WireGuard config must not carry junk params:\n%s", wg)
+	}
+}
+
+// The proxy name has to name the protocol and nothing else: several configs land
+// in one mihomo file, and an address in the name goes stale on the next scan.
+func TestMihomoName(t *testing.T) {
+	for _, tc := range []struct {
+		run  protoRun
+		want string
+	}{
+		{protoRun{kindWG, protoWG}, "WG WARP"},
+		{protoRun{kindAWG, protoAWG}, "AWG WARP"},
+		{protoRun{kindMASQUE, protoMASQUE}, "MASQUE H3 WARP"},
+		{protoRun{kindMASQUEH2, protoMASQUEH2}, "MASQUE H2 WARP"},
+	} {
+		if got := mihomoName(tc.run); got != tc.want {
+			t.Errorf("mihomoName(%s) = %q, want %q", tc.run.name, got, tc.want)
+		}
 	}
 }
 
