@@ -399,9 +399,10 @@ func TestJunkCommand(t *testing.T) {
 }
 
 func TestParseProto(t *testing.T) {
-	for _, p := range []string{protoWG, protoAWG, protoMASQUE} {
+	for _, p := range []string{protoWG, protoAWG, protoMASQUE, protoMASQUEH2} {
 		run, err := parseProto(p)
-		if err != nil || run.name != p || run.isAWG() != (p == protoAWG) || run.isMASQUE() != (p == protoMASQUE) {
+		masque := p == protoMASQUE || p == protoMASQUEH2
+		if err != nil || run.name != p || run.isAWG() != (p == protoAWG) || run.isMASQUE() != masque || run.isH2() != (p == protoMASQUEH2) {
 			t.Errorf("parseProto(%q) = %+v, %v", p, run, err)
 		}
 	}
@@ -420,6 +421,36 @@ func TestPoolsFor(t *testing.T) {
 	}
 	if got := poolsFor(protoRun{kindAWG, protoAWG}, false); len(got) != len(poolsV4) {
 		t.Errorf("poolsFor(awg, v4) = %d prefixes, want the WireGuard pools", len(got))
+	}
+
+	h2 := protoRun{kindMASQUEH2, protoMASQUEH2}
+	if got := poolsFor(h2, false); len(got) != len(masqueH2PoolsV4) || got[0] != masqueH2PoolsV4[0] {
+		t.Errorf("poolsFor(masque-h2, v4) = %v, want the HTTP/2 pools", got)
+	}
+	if got := poolsFor(h2, true); len(got) != len(masqueH2PoolsV6) {
+		t.Errorf("poolsFor(masque-h2, v6) = %v, want the HTTP/2 v6 pools", got)
+	}
+}
+
+// -conf under masque-h2 must fill usque's HTTP/2 field pair, not the QUIC one.
+func TestRenderMasqueConfH2(t *testing.T) {
+	saved := masqueAcct
+	defer func() { masqueAcct = saved }()
+	masqueAcct = &masqueAccount{PrivateKey: "cHJpdg==", ID: "dev-1"}
+
+	out, err := renderMasqueConf("162.159.199.7:443", true)
+	if err != nil {
+		t.Fatalf("renderMasqueConf: %v", err)
+	}
+	var c usqueConf
+	if err := json.Unmarshal(out, &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if c.EndpointH2V4 != "162.159.199.7" {
+		t.Errorf("EndpointH2V4 = %q, want the scanned address", c.EndpointH2V4)
+	}
+	if c.EndpointV4 == "162.159.199.7" {
+		t.Error("EndpointV4 carries the HTTP/2 address, want the QUIC default")
 	}
 }
 
@@ -496,7 +527,7 @@ func TestRenderMasqueConf(t *testing.T) {
 		ID: "dev-1", Token: "tok", IPv4: "172.16.0.2", IPv6: "2606:4700:110::1",
 	}
 
-	out, err := renderMasqueConf("162.159.198.1:8443")
+	out, err := renderMasqueConf("162.159.198.1:8443", false)
 	if err != nil {
 		t.Fatalf("renderMasqueConf: %v", err)
 	}
@@ -515,7 +546,7 @@ func TestRenderMasqueConf(t *testing.T) {
 		t.Errorf("conf lost account fields: %+v", c)
 	}
 
-	if _, err := renderMasqueConf("162.159.198.1"); err == nil {
+	if _, err := renderMasqueConf("162.159.198.1", false); err == nil {
 		t.Error("renderMasqueConf accepted an endpoint without a port")
 	}
 }
@@ -525,7 +556,7 @@ func TestRenderMasqueConfV6Endpoint(t *testing.T) {
 	defer func() { masqueAcct = saved }()
 	masqueAcct = &masqueAccount{PrivateKey: "cHJpdg==", ID: "dev-1"}
 
-	out, err := renderMasqueConf("[2606:4700:103::1]:443")
+	out, err := renderMasqueConf("[2606:4700:103::1]:443", false)
 	if err != nil {
 		t.Fatalf("renderMasqueConf: %v", err)
 	}
@@ -937,10 +968,10 @@ func TestSpeedTargets(t *testing.T) {
 		}
 	}
 	results := []endpointResult{
-		ok("8.47.69.10", 3, "DME"),    // subnet pick, and the DME node pick - counted once
-		ok("8.47.69.11", 9, "FRA"),    // not its subnet's pick, but it is the FRA node pick
-		ok("188.114.96.5", 40, "FRA"), // subnet pick only
-		ok("188.114.96.6", 41, "FRA"), // shown by neither table
+		ok("8.47.69.10", 3, "DME"),                                           // subnet pick, and the DME node pick - counted once
+		ok("8.47.69.11", 9, "FRA"),                                           // not its subnet's pick, but it is the FRA node pick
+		ok("188.114.96.5", 40, "FRA"),                                        // subnet pick only
+		ok("188.114.96.6", 41, "FRA"),                                        // shown by neither table
 		{endpoint: "8.47.69.12:2408", ip: netip.MustParseAddr("8.47.69.12")}, // not working
 	}
 

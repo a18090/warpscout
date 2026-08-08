@@ -135,6 +135,7 @@ const (
 	kindWG protoKind = iota
 	kindAWG
 	kindMASQUE
+	kindMASQUEH2
 )
 
 type protoRun struct {
@@ -143,18 +144,25 @@ type protoRun struct {
 }
 
 const (
-	protoWG     = "wg"
-	protoAWG    = "awg"
-	protoMASQUE = "masque"
+	protoWG       = "wg"
+	protoAWG      = "awg"
+	protoMASQUE   = "masque"
+	protoMASQUEH2 = "masque-h2"
 )
 
-func (r protoRun) isAWG() bool    { return r.kind == kindAWG }
-func (r protoRun) isMASQUE() bool { return r.kind == kindMASQUE }
+func (r protoRun) isAWG() bool { return r.kind == kindAWG }
+
+// Both MASQUE kinds run the same CONNECT-IP tunnel and differ only in the
+// transport underneath it, so everything that branches on "is this MASQUE"
+// stays one branch and only the transport asks isH2.
+func (r protoRun) isMASQUE() bool { return r.kind == kindMASQUE || r.kind == kindMASQUEH2 }
+func (r protoRun) isH2() bool     { return r.kind == kindMASQUEH2 }
 
 var protoRuns = []protoRun{
 	{kindWG, protoWG},
 	{kindAWG, protoAWG},
 	{kindMASQUE, protoMASQUE},
+	{kindMASQUEH2, protoMASQUEH2},
 }
 
 func parseProto(p string) (protoRun, error) {
@@ -163,5 +171,5 @@ func parseProto(p string) (protoRun, error) {
 			return r, nil
 		}
 	}
-	return protoRun{}, fmt.Errorf("invalid -proto %q: use wg, awg or masque", p)
+	return protoRun{}, fmt.Errorf("invalid -proto %q: use wg, awg, masque or masque-h2", p)
 }

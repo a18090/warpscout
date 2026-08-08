@@ -34,7 +34,13 @@ var pools = poolsV4
 func poolsFor(run protoRun, ipv6 bool) []netip.Prefix {
 	if run.isMASQUE() {
 		if ipv6 {
+			if run.isH2() {
+				return masqueH2PoolsV6
+			}
 			return masquePoolsV6
+		}
+		if run.isH2() {
+			return masqueH2PoolsV4
 		}
 		return masquePoolsV4
 	}

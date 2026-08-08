@@ -88,7 +88,7 @@ var (
 	}}
 
 	protoGroup = flagGroup{"Protocol", []flagSpec{
-		{"p", "proto", "wg|awg|masque", "tunnel protocol: wg (WireGuard), awg (AmneziaWG) or masque (QUIC)"},
+		{"p", "proto", "wg|awg|masque|masque-h2", "tunnel protocol: wg (WireGuard), awg (AmneziaWG), masque (CONNECT-IP over QUIC) or masque-h2 (CONNECT-IP over TCP)"},
 	}}
 
 	awgGroup = flagGroup{"AmneziaWG obfuscation parameters", []flagSpec{
@@ -538,7 +538,7 @@ func defaultNote(st conStyles, fs *flag.FlagSet, long string) string {
 }
 
 func rejectMasqueFilters(o options) {
-	if o.proto != protoMASQUE {
+	if o.proto != protoMASQUE && o.proto != protoMASQUEH2 {
 		return
 	}
 	for _, f := range []struct {
@@ -546,7 +546,7 @@ func rejectMasqueFilters(o options) {
 		set  bool
 	}{{"-node", len(o.colos) > 0}, {"-country", len(o.countries) > 0}} {
 		if f.set {
-			fmt.Fprintf(os.Stderr, "%s does not apply to -proto masque: every MASQUE endpoint exits through the same node\n", f.name)
+			fmt.Fprintf(os.Stderr, "%s does not apply to -proto %s: every MASQUE endpoint exits through the same node\n", f.name, o.proto)
 			os.Exit(2)
 		}
 	}

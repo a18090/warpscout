@@ -48,7 +48,7 @@ type tunnel interface {
 
 func newTunnel(run protoRun) (tunnel, error) {
 	if run.isMASQUE() {
-		return newMasqueTunnel()
+		return newMasqueTunnel(run.isH2())
 	}
 	return newWGTunnel(run.isAWG())
 }

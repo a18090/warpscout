@@ -74,7 +74,7 @@ func renderConfFor(o options, endpoint string, run protoRun) ([]byte, error) {
 		return renderMihomoConf(o, endpoint, run)
 	}
 	if run.isMASQUE() {
-		return renderMasqueConf(endpoint)
+		return renderMasqueConf(endpoint, run.isH2())
 	}
 	return []byte(renderConf(o, endpoint, run)), nil
 }
@@ -148,6 +148,11 @@ func mihomoPeer(b *strings.Builder, run protoRun, ipv6 bool) error {
 			return err
 		}
 		fmt.Fprintf(b, "  type: masque\n")
+		// mihomo's default is HTTP/3; the TCP transport is the same type with a
+		// network selector rather than a type of its own.
+		if run.isH2() {
+			fmt.Fprintf(b, "  network: h2\n")
+		}
 		fmt.Fprintf(b, "  sni: %s\n", masqueSNI)
 		fmt.Fprintf(b, "  private-key: %s\n", masqueAcct.PrivateKey)
 		fmt.Fprintf(b, "  public-key: %s\n", pub)

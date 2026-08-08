@@ -61,6 +61,23 @@ var (
 	}
 )
 
+// CONNECT-IP over TCP+TLS/HTTP2 is Cloudflare's own fallback transport, and the
+// QUIC measurement above says nothing about it: usque defaults to 162.159.198.2
+// and documents no v6 address at all
+// (https://github.com/Diniboy1123/usque/wiki/HTTP-2-support). How much of these
+// ranges answers over TCP is what -p masque-h2 measures.
+var (
+	masqueH2PoolsV4 = []netip.Prefix{
+		netip.MustParsePrefix("162.159.198.0/24"),
+		netip.MustParsePrefix("162.159.199.0/24"),
+	}
+	// Only the 103 block answers: measured on two v6-capable hosts, every sampled
+	// address in 2606:4700:102::/120 came back dead on both.
+	masqueH2PoolsV6 = []netip.Prefix{
+		netip.MustParsePrefix("2606:4700:103::/120"),
+	}
+)
+
 // The API hands this list out per account, but it is the same everywhere and
 // usque's own config.json has no port field at all, so it is a constant.
 var masqueEndpointPorts = []int{443, 500, 1701, 4500, 4443, 8443, 8095}
@@ -243,7 +260,7 @@ func (a masqueAccount) tlsConfig() (*tls.Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return api.PrepareTlsConfig(priv, peerPub, cert, masqueSNI)
+	return api.PrepareTlsConfig(priv, peerPub, cert, masqueSNI, false)
 }
 
 func (a masqueAccount) localAddrs() ([]netip.Addr, error) {
@@ -262,10 +279,14 @@ func (a masqueAccount) localAddrs() ([]netip.Addr, error) {
 // MASQUE has no wg-style .conf, so -conf writes the config.json usque reads.
 // The endpoint the scan picked goes in as the v4 or v6 endpoint depending on its
 // own family; the other one is left as usque's own default.
+// usque reads the HTTP/2 endpoint from its own field pair, so an h2 run fills
+// those and leaves the QUIC ones at their defaults.
 type usqueConf struct {
 	PrivateKey     string `json:"private_key"`
 	EndpointV4     string `json:"endpoint_v4"`
 	EndpointV6     string `json:"endpoint_v6"`
+	EndpointH2V4   string `json:"endpoint_h2_v4,omitempty"`
+	EndpointH2V6   string `json:"endpoint_h2_v6,omitempty"`
 	EndpointPubKey string `json:"endpoint_pub_key"`
 	ID             string `json:"id"`
 	AccessToken    string `json:"access_token"`
@@ -273,7 +294,7 @@ type usqueConf struct {
 	IPv6           string `json:"ipv6"`
 }
 
-func renderMasqueConf(endpoint string) ([]byte, error) {
+func renderMasqueConf(endpoint string, h2 bool) ([]byte, error) {
 	if masqueAcct == nil {
 		return nil, fmt.Errorf("no MASQUE device in the account file")
 	}
@@ -295,9 +316,14 @@ func renderMasqueConf(endpoint string) ([]byte, error) {
 		IPv4:           masqueAcct.IPv4,
 		IPv6:           masqueAcct.IPv6,
 	}
-	if addr.Is4() {
+	switch {
+	case h2 && addr.Is4():
+		c.EndpointH2V4 = host
+	case h2:
+		c.EndpointH2V6 = host
+	case addr.Is4():
 		c.EndpointV4 = host
-	} else {
+	default:
 		c.EndpointV6 = host
 	}
 	return json.MarshalIndent(c, "", "  ")
@@ -309,6 +335,7 @@ type masqueTunnel struct {
 	*ipStack
 	dev    tun.Device
 	tlsCfg *tls.Config
+	h2     bool
 
 	mu   sync.Mutex
 	conn *connectip.Conn
@@ -321,7 +348,7 @@ type masqueTunnel struct {
 // rather than left to scribble over the live dashboard.
 var muteLibLog sync.Once
 
-func newMasqueTunnel() (*masqueTunnel, error) {
+func newMasqueTunnel(h2 bool) (*masqueTunnel, error) {
 	muteLibLog.Do(func() { log.SetOutput(io.Discard) })
 	if masqueAcct == nil {
 		return nil, fmt.Errorf("no MASQUE device in the account file: run \"warpscout register\" again")
@@ -339,7 +366,7 @@ func newMasqueTunnel() (*masqueTunnel, error) {
 		return nil, err
 	}
 
-	t := &masqueTunnel{ipStack: stack, dev: dev, tlsCfg: tlsCfg}
+	t := &masqueTunnel{ipStack: stack, dev: dev, tlsCfg: tlsCfg, h2: h2}
 	go t.pumpOut()
 	return t, nil
 }
@@ -402,27 +429,40 @@ func (t *masqueTunnel) pumpIn(ctx context.Context, conn *connectip.Conn) {
 	}
 }
 
+// ConnectTunnel dispatches on the address type, not on the useHTTP2 flag alone:
+// HTTP/2 needs a TCPAddr and HTTP/3 a UDPAddr.
+func (t *masqueTunnel) resolveEndpoint(endpoint string) (net.Addr, error) {
+	if t.h2 {
+		return net.ResolveTCPAddr("tcp", endpoint)
+	}
+	return net.ResolveUDPAddr("udp", endpoint)
+}
+
 // A successful dial is the MASQUE equivalent of the WireGuard handshake, but a
 // weaker signal: measured on a filtered network, every endpoint dialled and only
 // two passed data, so callers must still verify with /meta or a ping.
 func (t *masqueTunnel) handshake(ctx context.Context, endpoint string, timeout time.Duration) bool {
 	t.dropPeer()
 
-	udpAddr, err := net.ResolveUDPAddr("udp", endpoint)
+	remote, err := t.resolveEndpoint(endpoint)
 	if err != nil {
 		return false
 	}
-	dialCtx, cancelDial := context.WithTimeout(ctx, timeout)
-	defer cancelDial()
+	// The deadline may only bound the dial: over HTTP/2 the CONNECT-IP stream is
+	// one long-lived request carried by this very context, so a WithTimeout - or
+	// the usual defer cancel() - kills the tunnel the moment the dial returns.
+	dialCtx, cancelDial := context.WithCancel(ctx)
+	dialDeadline := time.AfterFunc(timeout, cancelDial)
 	// A blocked endpoint completes the QUIC handshake and then never answers the
 	// CONNECT-IP request, and neither dialCtx nor HandshakeIdleTimeout ends that
 	// wait - measured, the dial returned after quic-go's own MaxIdleTimeout every
 	// time. Both are set anyway, one per stall.
 	udpConn, tr, conn, _, err := api.ConnectTunnel(dialCtx, t.tlsCfg,
 		&quic.Config{EnableDatagrams: true, KeepAlivePeriod: masqueKeepalive, HandshakeIdleTimeout: timeout, MaxIdleTimeout: masqueIdleTimeout},
-		masqueConnectURI, udpAddr)
-	if err != nil {
-		closeMasqueTransport(udpConn, tr, nil)
+		masqueConnectURI, remote, t.h2)
+	if err != nil || !dialDeadline.Stop() {
+		cancelDial()
+		closeMasqueTransport(udpConn, tr, conn)
 		return false
 	}
 
@@ -433,6 +473,7 @@ func (t *masqueTunnel) handshake(ctx context.Context, endpoint string, timeout t
 	t.conn = conn
 	t.drop = func() {
 		cancelPump()
+		cancelDial()
 		closeMasqueTransport(udpConn, tr, conn)
 	}
 	t.mu.Unlock()
