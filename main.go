@@ -111,6 +111,7 @@ func runFindJunkCmd(ctx context.Context, opts options) error {
 }
 
 func runFindSNICmd(ctx context.Context, opts options) error {
+	validateSNIProto(opts)
 	if err := validateThreshold(opts.threshold); err != nil {
 		return err
 	}

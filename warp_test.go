@@ -624,13 +624,20 @@ func TestScoreSNI(t *testing.T) {
 }
 
 func TestSNICommand(t *testing.T) {
-	got := sniCommand(sniCandidate{sni: "www.apple.com"})
+	masque := protoRun{kindMASQUE, protoMASQUE}
+	got := sniCommand(masque, sniCandidate{sni: "www.apple.com"})
 	if want := "scan -proto masque -masque-sni www.apple.com"; !strings.HasSuffix(got, want) {
 		t.Errorf("sniCommand() = %q, want suffix %q", got, want)
 	}
-	got = sniCommand(sniCandidate{sni: masqueDefaultSNI})
+	got = sniCommand(masque, sniCandidate{sni: masqueDefaultSNI})
 	if want := "scan -proto masque"; !strings.HasSuffix(got, want) {
 		t.Errorf("sniCommand(default) = %q, want suffix %q", got, want)
+	}
+	// The command has to name the transport the round actually searched: an SNI
+	// that works over QUIC is not one that works over TCP.
+	got = sniCommand(protoRun{kindMASQUEH2, protoMASQUEH2}, sniCandidate{sni: "www.apple.com"})
+	if want := "scan -proto masque-h2 -masque-sni www.apple.com"; !strings.HasSuffix(got, want) {
+		t.Errorf("sniCommand(h2) = %q, want suffix %q", got, want)
 	}
 }
 

@@ -15,6 +15,12 @@ import (
 // candidate here.
 const defaultSNIThreshold = 70
 
+// One address per subnet keeps a round at the same size on either transport:
+// two addresses times masqueEndpointPorts. The QUIC pools are single addresses
+// anyway, but the HTTP/2 ones are /24s, and sampling them fully would drown the
+// threshold in addresses the SNI has nothing to do with.
+const findSNISample = 1
+
 const (
 	findSNIQuitHint      = "q or Ctrl+C to stop and keep the best SNI"
 	findSNIPlainQuitHint = "Ctrl+C to stop and keep the best SNI"
@@ -74,7 +80,7 @@ func runFindSNI(ctx context.Context, opts options, run protoRun, ips []netip.Add
 		if c.meets(opts.threshold) {
 			fmt.Fprintln(os.Stderr, errPal.ok(c.String()))
 			fmt.Fprintln(os.Stderr)
-			return reportSNI(c, true)
+			return reportSNI(run, c, true)
 		}
 		fmt.Fprintln(os.Stderr, errPal.dim(c.String()))
 		fmt.Fprintln(os.Stderr)
@@ -87,7 +93,7 @@ func runFindSNI(ctx context.Context, opts options, run protoRun, ips []netip.Add
 		fmt.Fprintln(os.Stderr, errPal.dim("No SNI finished a scan - nothing to report."))
 		return nil
 	}
-	return reportSNI(best, false)
+	return reportSNI(run, best, false)
 }
 
 func scoreSNI(sni string, ph phaseResult) sniCandidate {
@@ -101,7 +107,7 @@ func scoreSNI(sni string, ph phaseResult) sniCandidate {
 	return c
 }
 
-func reportSNI(c sniCandidate, complete bool) error {
+func reportSNI(run protoRun, c sniCandidate, complete bool) error {
 	fmt.Fprintln(os.Stderr)
 	if complete {
 		fmt.Fprintln(os.Stderr, errPal.ok("Good enough: "+c.String()))
@@ -112,13 +118,13 @@ func reportSNI(c sniCandidate, complete bool) error {
 	fmt.Fprintln(os.Stderr, errPal.title("Ready-to-run scan command with this SNI:"))
 	fmt.Fprintln(os.Stderr)
 	outPal := palette{enabled: colorEnabled(os.Stdout)}
-	fmt.Fprintln(os.Stdout, outPal.accent(sniCommand(c)))
+	fmt.Fprintln(os.Stdout, outPal.accent(sniCommand(run, c)))
 	fmt.Fprintln(os.Stderr)
 	return nil
 }
 
-func sniCommand(c sniCandidate) string {
-	parts := []string{runnableBinary(), "scan", "-proto", protoMASQUE}
+func sniCommand(run protoRun, c sniCandidate) string {
+	parts := []string{runnableBinary(), "scan", "-proto", run.name}
 	if c.sni != masqueDefaultSNI {
 		parts = append(parts, "-masque-sni", c.sni)
 	}

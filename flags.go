@@ -129,6 +129,7 @@ var (
 	}, netSpecs...)}
 
 	findSNIGroup = flagGroup{"Search tuning", append([]flagSpec{
+		{"p", "proto", "masque|masque-h2", "which MASQUE transport to search an SNI for: QUIC or TCP"},
 		{"jt", "tunnel-jobs", "N", "tunnel workers per round"},
 		{"", "threshold", "PCT", "accept an SNI once this share of the endpoints works"},
 		{"", "masque-attempts", "N", "how many times to re-check a failing MASQUE endpoint before calling it dead"},
@@ -240,7 +241,8 @@ func setupFindSNIFlags(fs *flag.FlagSet, o *options) {
 	fs.IntVar(&o.threshold, "threshold", defaultSNIThreshold, "")
 	fs.IntVar(&masqueAttempts, "masque-attempts", masqueDefaultAttempts, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
-	o.proto = protoMASQUE
+	strFlag(fs, &o.proto, protoMASQUE, "p", "proto")
+	o.perSubnet = findSNISample
 	o.tunPingCheck = true
 }
 
@@ -295,6 +297,16 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	applyNode(o)
 	rejectMasqueFilters(*o)
 	validateMasqueAttempts()
+}
+
+// find-sni is a MASQUE-only command, but it has two transports to search now,
+// so -proto is registered and then bounded here rather than pinned.
+func validateSNIProto(o options) {
+	if o.proto == protoMASQUE || o.proto == protoMASQUEH2 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "find-sni searches a MASQUE SNI: -proto must be %s or %s, not %q\n", protoMASQUE, protoMASQUEH2, o.proto)
+	os.Exit(2)
 }
 
 func applyTarget(o *options) {
