@@ -341,6 +341,13 @@ warpscout scan -p awg -country DE,NL -best
 warpscout scan -p awg -node HEL,ARN -best
 ```
 
+`-exclude-node` и `-exclude-country` - то же самое наоборот: выбросить эти узлы или страны, оставить всё остальное. Они стакаются с положительными фильтрами, ради чего и заведены: оставить страну, выбросив один её узел.
+
+```sh
+warpscout scan -p awg -exclude-node DME -best
+warpscout scan -p awg -country SE,DE -exclude-node ARN -best
+```
+
 Если после фильтров ничего не осталось, команда завершается ошибкой.
 
 `-conf` пишет готовый к импорту конфиг WireGuard или AmneziaWG для единственного лучшего эндпоинта запуска:

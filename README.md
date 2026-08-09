@@ -339,6 +339,13 @@ warpscout scan -p awg -country DE,NL -best
 warpscout scan -p awg -node HEL,ARN -best
 ```
 
+`-exclude-node` and `-exclude-country` are the same thing inverted - drop these nodes or countries, keep everything else. They stack with the positive filters, which is the useful case: keep a country, drop one of its nodes.
+
+```sh
+warpscout scan -p awg -exclude-node DME -best
+warpscout scan -p awg -country SE,DE -exclude-node ARN -best
+```
+
 If nothing is left after the filters, the command exits with an error.
 
 `-conf` writes a ready-to-import WireGuard or AmneziaWG config for the single best endpoint of the run:
