@@ -168,13 +168,8 @@ func runScanCmd(ctx context.Context, opts options) error {
 		os.Exit(1)
 	}
 
-	if len(opts.colos) > 0 {
-		ph = filterByColo(ph, opts.colos)
-	}
-	if len(opts.countries) > 0 {
-		ph = filterByCountry(ph, opts.countries)
-	}
-	if len(opts.colos) > 0 || len(opts.countries) > 0 {
+	if filtered(opts) {
+		ph = applyFilters(ph, opts)
 		pools = poolsWithHits(ph)
 	}
 
@@ -302,6 +297,28 @@ func anyEndpoint(ph phaseResult) bool {
 	return false
 }
 
+func filtered(opts options) bool {
+	return len(opts.colos)+len(opts.countries)+len(opts.dropColos)+len(opts.dropCountries) > 0
+}
+
+func applyFilters(ph phaseResult, opts options) phaseResult {
+	for _, f := range []struct {
+		list []string
+		want bool
+		by   func(phaseResult, []string, bool) phaseResult
+	}{
+		{opts.colos, true, filterByColo},
+		{opts.countries, true, filterByCountry},
+		{opts.dropColos, false, filterByColo},
+		{opts.dropCountries, false, filterByCountry},
+	} {
+		if len(f.list) > 0 {
+			ph = f.by(ph, f.list, f.want)
+		}
+	}
+	return ph
+}
+
 func noEndpointMsg(opts options) string {
 	var filters []string
 	if len(opts.colos) > 0 {
@@ -312,6 +329,15 @@ func noEndpointMsg(opts options) string {
 	}
 	if len(filters) > 0 {
 		return "no endpoint landed on " + strings.Join(filters, " and ")
+	}
+	if len(opts.dropColos) > 0 {
+		filters = append(filters, "node "+strings.Join(opts.dropColos, ", "))
+	}
+	if len(opts.dropCountries) > 0 {
+		filters = append(filters, "country "+strings.Join(opts.dropCountries, ", "))
+	}
+	if len(filters) > 0 {
+		return "every endpoint was excluded by " + strings.Join(filters, " and ")
 	}
 	if opts.proto == protoMASQUE {
 		return "no MASQUE endpoint passed data - this network blocks it, try -p awg"

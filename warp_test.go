@@ -899,7 +899,7 @@ func TestFilterByColo(t *testing.T) {
 		{endpoint: "3.3.3.3:2408"},
 	}}
 
-	got := filterByColo(ph, []string{"HEL"})
+	got := filterByColo(ph, []string{"HEL"}, true)
 	if len(got.results) != 1 {
 		t.Fatalf("filterByColo kept %v results, want 1", got.results)
 	}
@@ -908,6 +908,16 @@ func TestFilterByColo(t *testing.T) {
 	}
 	if got.run.name != "awg" {
 		t.Error("filterByColo dropped the proto run")
+	}
+
+	// The endpoint with no colo at all is dropped by the positive filter and
+	// kept by the negative one.
+	var dropped []string
+	for _, r := range filterByColo(ph, []string{"HEL"}, false).results {
+		dropped = append(dropped, r.endpoint)
+	}
+	if want := []string{"2.2.2.2:2408", "3.3.3.3:2408"}; strings.Join(dropped, ",") != strings.Join(want, ",") {
+		t.Errorf("filterByColo(HEL, exclude) = %v, want %v", dropped, want)
 	}
 }
 
@@ -918,15 +928,45 @@ func TestFilterByCountry(t *testing.T) {
 		{endpoint: "3.3.3.3:2408"},
 	}}
 
-	got := filterByCountry(ph, []string{"DE"})
+	got := filterByCountry(ph, []string{"DE"}, true)
 	if len(got.results) != 1 {
 		t.Fatalf("filterByCountry kept %v results, want 1", got.results)
 	}
 	if ep := got.results[0].endpoint; ep != "2.2.2.2:2408" {
 		t.Errorf("filterByCountry kept %s, want the FRA endpoint", ep)
 	}
-	if got := filterByCountry(ph, []string{"US"}); len(got.results) != 0 {
+	if got := filterByCountry(ph, []string{"US"}, true); len(got.results) != 0 {
 		t.Errorf("filterByCountry(US) kept %v, want nothing", got.results)
+	}
+
+	var dropped []string
+	for _, r := range filterByCountry(ph, []string{"DE"}, false).results {
+		dropped = append(dropped, r.endpoint)
+	}
+	if want := []string{"1.1.1.1:2408", "3.3.3.3:2408"}; strings.Join(dropped, ",") != strings.Join(want, ",") {
+		t.Errorf("filterByCountry(DE, exclude) = %v, want %v", dropped, want)
+	}
+}
+
+func TestApplyFilters(t *testing.T) {
+	ph := phaseResult{results: []endpointResult{
+		{endpoint: "1.1.1.1:2408", exit: metaResult{colo: "HEL", coloISO: "FI"}},
+		{endpoint: "2.2.2.2:2408", exit: metaResult{colo: "ARN", coloISO: "SE"}},
+		{endpoint: "3.3.3.3:2408", exit: metaResult{colo: "FRA", coloISO: "DE"}},
+		{endpoint: "4.4.4.4:2408", exit: metaResult{colo: "DME", coloISO: "RU"}},
+	}}
+
+	// Positive and negative filters stack: countries first, then the node drop.
+	opts := options{countries: []string{"FI", "SE", "DE"}, dropColos: []string{"ARN"}}
+	var got []string
+	for _, r := range applyFilters(ph, opts).results {
+		got = append(got, r.endpoint)
+	}
+	if want := []string{"1.1.1.1:2408", "3.3.3.3:2408"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("applyFilters = %v, want %v", got, want)
+	}
+	if !filtered(opts) || filtered(options{}) {
+		t.Error("filtered() disagrees with the filters it is given")
 	}
 }
 

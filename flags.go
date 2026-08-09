@@ -39,9 +39,13 @@ type options struct {
 	innerProto     string
 	node           string
 	country        string
+	excludeNode    string
+	excludeCountry string
 	targets        []netip.Prefix
 	colos          []string
 	countries      []string
+	dropColos      []string
+	dropCountries  []string
 	best           bool
 	noReport       bool
 	tableOff       bool
@@ -122,6 +126,8 @@ var (
 		{"", "no-dns", "", "leave the DNS line out of the generated config"},
 		{"", "node", "COLO", "keep only endpoints landing on these edge nodes: comma-separated IATA codes"},
 		{"", "country", "ISO", "keep only endpoints whose edge node sits in these countries: comma-separated ISO codes"},
+		{"", "exclude-node", "COLO", "drop endpoints landing on these edge nodes: comma-separated IATA codes"},
+		{"", "exclude-country", "ISO", "drop endpoints whose edge node sits in these countries: comma-separated ISO codes"},
 		{"", "best", "", "print just the best endpoint as ip:port on stdout (for scripts and pipes)"},
 		{"", "plain", "", "force plain line output (no live TUI)"},
 		{"", "emoji", "", "prefix the colo region with a country flag emoji (rendering depends on the terminal)"},
@@ -217,6 +223,8 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	boolFlag(fs, &o.full, "f", "full")
 	fs.StringVar(&o.node, "node", "", "")
 	fs.StringVar(&o.country, "country", "", "")
+	fs.StringVar(&o.excludeNode, "exclude-node", "", "")
+	fs.StringVar(&o.excludeCountry, "exclude-country", "", "")
 	fs.BoolVar(&o.best, "best", false, "")
 	fs.StringVar(&o.conf, "conf", "", "")
 	fs.StringVar(&o.confType, "conf-type", confTypeNative, "")
@@ -399,6 +407,8 @@ func applyTarget(o *options) {
 func applyNode(o *options) {
 	o.colos = splitList(o.node, "-node")
 	o.countries = splitList(o.country, "-country")
+	o.dropColos = splitList(o.excludeNode, "-exclude-node")
+	o.dropCountries = splitList(o.excludeCountry, "-exclude-country")
 }
 
 func splitList(value, flagName string) []string {
@@ -630,7 +640,12 @@ func rejectMasqueFilters(o options) {
 	for _, f := range []struct {
 		name string
 		set  bool
-	}{{"-node", len(o.colos) > 0}, {"-country", len(o.countries) > 0}} {
+	}{
+		{"-node", len(o.colos) > 0},
+		{"-country", len(o.countries) > 0},
+		{"-exclude-node", len(o.dropColos) > 0},
+		{"-exclude-country", len(o.dropCountries) > 0},
+	} {
 		if f.set {
 			fmt.Fprintf(os.Stderr, "%s does not apply to -proto %s: every MASQUE endpoint exits through the same node\n", f.name, o.proto)
 			os.Exit(2)

@@ -189,22 +189,25 @@ func poolsWithHits(ph phaseResult) []netip.Prefix {
 	return out
 }
 
-func filterByColo(ph phaseResult, colos []string) phaseResult {
-	keep := upperSet(colos)
+// want=false inverts the filter, which is all -exclude-node/-exclude-country
+// are. An endpoint with no colo at all is dropped by the positive filter and
+// kept by the negative one.
+func filterByColo(ph phaseResult, colos []string, want bool) phaseResult {
+	listed := upperSet(colos)
 	return filterResults(ph, func(r endpointResult) bool {
-		_, ok := keep[strings.ToUpper(r.exit.colo)]
-		return ok
+		_, ok := listed[strings.ToUpper(r.exit.colo)]
+		return ok == want
 	})
 }
 
-func filterByCountry(ph phaseResult, countries []string) phaseResult {
-	keep := upperSet(countries)
+func filterByCountry(ph phaseResult, countries []string, want bool) phaseResult {
+	listed := upperSet(countries)
 	return filterResults(ph, func(r endpointResult) bool {
 		if r.exit.coloISO == "" {
-			return false
+			return !want
 		}
-		_, ok := keep[strings.ToUpper(r.exit.coloISO)]
-		return ok
+		_, ok := listed[strings.ToUpper(r.exit.coloISO)]
+		return ok == want
 	})
 }
 
