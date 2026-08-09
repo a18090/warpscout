@@ -127,6 +127,7 @@ func peerUAPI(endpoint string) (string, error) {
 	fmt.Fprintf(&b, "public_key=%s\n", pubHex)
 	fmt.Fprintf(&b, "endpoint=%s\n", endpoint)
 	fmt.Fprintf(&b, "allowed_ip=0.0.0.0/0\n")
+	fmt.Fprintf(&b, "allowed_ip=::/0\n")
 	fmt.Fprintf(&b, "persistent_keepalive_interval=%d\n", keepalive)
 	return b.String(), nil
 }

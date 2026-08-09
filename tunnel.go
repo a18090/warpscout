@@ -64,7 +64,10 @@ func newWGTunnel(awg bool) (*wgTunnel, error) {
 		return nil, err
 	}
 
-	tunDev, stack, err := newIPStack([]netip.Addr{netip.MustParseAddr(warpAddress)})
+	tunDev, stack, err := newIPStack([]netip.Addr{
+		netip.MustParseAddr(warpAddress),
+		netip.MustParseAddr(warpAddressV6),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -273,8 +276,20 @@ func resolveMetaAddr(ctx context.Context, tnet *netstack.Net) bool {
 	if err != nil || len(ips) == 0 {
 		return false
 	}
-	metaAddr = net.JoinHostPort(ips[0], "443")
+	metaAddr = net.JoinHostPort(preferV4(ips), "443")
 	return true
+}
+
+// The tunnel carries both families, but the meta fetch stays on v4: it is where
+// every reported number was measured, and v6 only works once the account file
+// carries the device's own address.
+func preferV4(ips []string) string {
+	for _, ip := range ips {
+		if a, err := netip.ParseAddr(ip); err == nil && a.Is4() {
+			return ip
+		}
+	}
+	return ips[0]
 }
 
 const (
