@@ -22,6 +22,7 @@
 - [Install](#install)
 - [Usage](#usage)
 - [Scripting](#scripting)
+- [SOCKS](#socks)
 - [AmneziaWG obfuscation](#amneziawg-obfuscation)
 - [MASQUE](#masque)
 - [WARP-in-WARP](#warp-in-warp)
@@ -171,7 +172,7 @@ See [Docker](#docker-1) for what the flags are for.
 
 ## Usage
 
-WARPSCOUT has five commands. Run `warpscout <command> -h` for the full flag list of any of them.
+WARPSCOUT has these commands. Run `warpscout <command> -h` for the full flag list of any of them.
 
 | Command     | What it does                                             |
 | ----------- | -------------------------------------------------------- |
@@ -179,6 +180,7 @@ WARPSCOUT has five commands. Run `warpscout <command> -h` for the full flag list
 | `scan`      | Scan endpoints and report the working ones.              |
 | `find-junk` | Search for AmneziaWG settings that get through a filter. |
 | `find-sni`  | Search for a MASQUE SNI that gets through a filter.      |
+| `socks`     | Serve one endpoint as a local SOCKS5 proxy, to test it.  |
 | `version`   | Print the installed version on a line of its own.        |
 
 ### Step 1: register
@@ -387,6 +389,68 @@ warpscout scan -p awg -target 188.114.98.58,162.159.192.0/28
 ```
 
 IPv4 ranges wider than `/20` are rejected, and IPv4 cannot be mixed with IPv6 in one run.
+
+## SOCKS
+
+> [!WARNING]
+> For testing an endpoint, not for daily use. `socks` brings up one tunnel and keeps it: there is no reconnect and no failover, so once that tunnel drops the proxy stops working, and it does not survive a change of network either
+
+Everything the scan reports comes from Cloudflare's own `/meta` answer. `socks` hands the tunnel to any other tool instead: it dials one endpoint and serves it as a SOCKS5 proxy on localhost, so `curl`, a browser or a geo-lookup script like [ipregion](https://github.com/vernette/ipregion) can go through that exact endpoint without installing a VPN client and without root.
+
+```sh
+warpscout socks -e 188.114.99.218:2408 -p awg
+```
+
+```
+For testing purposes ONLY.
+One tunnel, no reconnect, no failover. For everyday use take a "scan -conf" config into a real client.
+
+╭─────────────────────────────────────╮
+│ SOCKS5   socks5h://127.0.0.1:1080   │
+│ Endpoint 188.114.99.218:2408        │
+│ Tunnel   awg                        │
+│ Exit     RU, node DME (Moscow, RU)  │
+╰─────────────────────────────────────╯
+
+Exit is what speed.cloudflare.com reports. Confirm it elsewhere:
+  curl -x socks5h://127.0.0.1:1080 https://ifconfig.co/json
+
+Point clients at socks5h://, not socks5:// - the name has to be resolved in the tunnel.
+
+Ctrl+C to stop the proxy
+```
+
+`Exit` is Cloudflare's own opinion of where the tunnel comes out, the same `/meta` answer the scan reports. The proxy is what lets you point another service at that tunnel and see whether it agrees with `Exit`.
+
+`-e/-endpoint` takes exactly what `scan -best` prints, so the two chain:
+
+```sh
+warpscout socks -e "$(warpscout scan -p awg -best)" -p awg
+```
+
+`-P/-port` changes the port the proxy listens on (1080 by default), `-l/-listen` the address (`127.0.0.1`). The protocol and obfuscation flags are the scan's own: `-p wg|awg|masque|masque-h2`, `-gen-i1`, `-masque-sni` and the rest.
+
+```sh
+warpscout socks -e 162.159.198.1:443 -p masque -masque-sni www.apple.com -port 9050
+```
+
+Point tools at it with `socks5h://`, not `socks5://`, so that the name is resolved on the tunnel's side rather than the client's.
+
+```sh
+curl -x socks5h://127.0.0.1:1080 https://ifconfig.co/json
+```
+
+`-through` works here too, and it is the only way to try a nested tunnel without building the interface chain by hand. That is how the region gets confirmed by a third party, `ifconfig.co` for one:
+
+```sh
+warpscout socks -e 8.47.69.130:2408 -p awg -through 188.114.97.177:2408
+# Tunnel   wg through 188.114.97.177:2408 (awg)
+# Exit     DE, node FRA (Frankfurt-am-Main, DE)
+curl -x socks5h://127.0.0.1:1080 https://ifconfig.co/json
+# "ip": "104.28.197.9", "country": "Germany", "city": "Frankfurt am Main"
+```
+
+`Ctrl+C` stops the proxy and the tunnel.
 
 ## AmneziaWG obfuscation
 
