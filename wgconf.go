@@ -196,7 +196,13 @@ func mihomoName(run protoRun) string {
 	return "WG WARP"
 }
 
-const mihomoOuterSuffix = " OUTER"
+// mihomo keys proxies by name, so the two halves of a chain have to differ - and
+// naming them is the only place the config says it is one ("AWG WARP OUTER" plus
+// "WG WARP-in-WARP", against a plain run's bare "WG WARP").
+const (
+	mihomoOuterSuffix = " OUTER"
+	mihomoChainSuffix = "-in-WARP"
+)
 
 func renderMihomoConf(o options, endpoint string, run protoRun) ([]byte, error) {
 	var b strings.Builder
@@ -226,7 +232,7 @@ func renderMihomoConf(o options, endpoint string, run protoRun) ([]byte, error) 
 	}
 	b.WriteString(indentBlock(block))
 
-	block, err = mihomoProxy(o, mihomoName(run), endpoint, run, nestedMTU(o.mtu), confDNS(o))
+	block, err = mihomoProxy(o, mihomoName(run)+mihomoChainSuffix, endpoint, run, nestedMTU(o.mtu), confDNS(o))
 	if err != nil {
 		return nil, err
 	}

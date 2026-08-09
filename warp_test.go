@@ -357,7 +357,7 @@ func TestRenderMihomoConfChained(t *testing.T) {
 		"private-key: outerPriv=",
 		"public-key: outerPub=",
 		"ip: 172.16.0.9",
-		"- name: \"WG WARP\"",
+		"- name: \"WG WARP-in-WARP\"",
 		"server: 8.47.69.130",
 		"private-key: " + warpPrivateKey,
 		"mtu: 1220",
@@ -375,7 +375,7 @@ func TestRenderMihomoConfChained(t *testing.T) {
 		t.Errorf("chained config carries %d dns lines, want 1:\n%s", n, got)
 	}
 	// The dialer-proxy must sit on the inner proxy, which is the second block.
-	if strings.Index(got, "dialer-proxy") < strings.Index(got, "- name: \"WG WARP\"") {
+	if strings.Index(got, "dialer-proxy") < strings.Index(got, "- name: \"WG WARP-in-WARP\"") {
 		t.Errorf("dialer-proxy belongs to the inner proxy:\n%s", got)
 	}
 	// Rendering must not leave the outer device's keys in the globals.
