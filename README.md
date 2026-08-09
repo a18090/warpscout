@@ -427,7 +427,7 @@ Cloudflare serves WARP not only over WireGuard, but over MASQUE as well.
 warpscout scan -p masque
 ```
 
-There are no endpoint pools. MASQUE answers on exactly two anycast addresses per family - `162.159.198.1` and `162.159.198.2`, `2606:4700:103::1` and `::2` - on a fixed set of ports (`443 500 1701 4500 4443 8443 8095`). A run covers those addresses times those ports.
+Over QUIC the pool is tiny and fixed: MASQUE answers on two anycast addresses per block - `162.159.198.1` and `162.159.198.2` over IPv4, `2606:4700:103::1`, `::2` and `2606:4700:104::1`, `::2` over IPv6 - on a fixed set of ports (`443 500 1701 4500 4443 8443 8095`). A run covers those addresses times those ports, so `-n`/`-f` have nothing to sample here. [`-p masque-h2`](#http2) is the mode with real pools.
 
 The same `masque` endpoint with the same SNI can be unstable, so every endpoint is checked at least 3 times. `-masque-attempts N` changes that.
 
@@ -466,7 +466,7 @@ warpscout scan -p masque-h2 -masque-sni www.apple.com
 
 Everything else stays the same - same account, same ports, same SNI knob, same `-node`/`-country` rejection - but the endpoints are no longer two addresses: the whole of `162.159.198.0/24` and `162.159.199.0/24` answers, so `-n`/`-f` decide how much of it a run covers.
 
-Under `-6` the pool is `2606:4700:103::/120`.
+Under `-6` the pools are `2606:4700:103::/48` and `2606:4700:104::/48` - the whole of both blocks answers.
 
 ### Registration and configs
 
