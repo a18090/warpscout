@@ -22,9 +22,11 @@ var (
 	warpPrivateKey = "4OnO86dDLpqJ2U10ODwX3tarx6xlRGLfkmbSBtMgaHg="
 	warpPublicKey  = "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo="
 	warpAddress    = "172.16.0.2"
+	// Replaced by the account's own v6 when the file carries one. The fallback is
+	// someone else's device address: it renders a usable config line, but traffic
+	// sent from it is dropped, because WARP routes v6 per device instead of NAT-ing it.
+	warpAddressV6 = "2606:4700:110:8d87:b0ba:4148:5a61:4873"
 )
-
-const warpAddressV6 = "2606:4700:110:8d87:b0ba:4148:5a61:4873"
 
 const (
 	tunnelMTU = 1280

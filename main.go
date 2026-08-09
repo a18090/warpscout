@@ -55,6 +55,9 @@ func loadScanAccount(path string) error {
 	}
 	applyAccount(a)
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Using cached WARP account from %s", path)))
+	if a.IPv6 == "" {
+		fmt.Fprintln(os.Stderr, errPal.fail("this account file predates per-device addresses - IPv6 falls back to a constant that Cloudflare drops; run \"warpscout register\" again"))
+	}
 	fmt.Fprintln(os.Stderr)
 	return nil
 }

@@ -39,6 +39,8 @@ type account struct {
 	Token         string         `json:"token"`
 	PrivateKey    string         `json:"private_key"`
 	PeerPublicKey string         `json:"peer_public_key"`
+	IPv4          string         `json:"ipv4,omitempty"`
+	IPv6          string         `json:"ipv6,omitempty"`
 	Masque        *masqueAccount `json:"masque,omitempty"`
 }
 
@@ -94,6 +96,12 @@ func saveAccount(path string, a account) error {
 func applyAccount(a account) {
 	warpPrivateKey = a.PrivateKey
 	warpPublicKey = a.PeerPublicKey
+	if a.IPv4 != "" {
+		warpAddress = a.IPv4
+	}
+	if a.IPv6 != "" {
+		warpAddressV6 = a.IPv6
+	}
 	masqueAcct = a.Masque
 }
 
@@ -104,6 +112,12 @@ type regResp struct {
 		Peers []struct {
 			PublicKey string `json:"public_key"`
 		} `json:"peers"`
+		Interface struct {
+			Addresses struct {
+				V4 string `json:"v4"`
+				V6 string `json:"v6"`
+			} `json:"addresses"`
+		} `json:"interface"`
 	} `json:"config"`
 }
 
@@ -120,6 +134,8 @@ func parseRegResp(body []byte, privateKey string) (account, error) {
 		PeerPublicKey: r.Config.Peers[0].PublicKey,
 		ID:            r.ID,
 		Token:         r.Token,
+		IPv4:          r.Config.Interface.Addresses.V4,
+		IPv6:          r.Config.Interface.Addresses.V6,
 	}
 	return a, nil
 }
