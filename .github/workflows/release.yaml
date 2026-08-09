@@ -65,7 +65,9 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Commit list
+      - name: Release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
           RANGE="${PREV:+$PREV..}${GITHUB_REF_NAME}"
@@ -75,6 +77,10 @@ jobs:
             git -P log --no-merges \
               --pretty="- %s ([\`%h\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/%H))" \
               "$RANGE"
+            echo
+            gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="${GITHUB_REF_NAME}" ${PREV:+-f previous_tag_name="$PREV"} \
+              --jq .body | sed -n '/^## New Contributors/,$p'
           } > body.md
 
       - uses: actions/download-artifact@v4
@@ -86,4 +92,3 @@ jobs:
         with:
           files: dist/*
           body_path: body.md
-          generate_release_notes: true
