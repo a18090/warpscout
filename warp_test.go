@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"math"
 	"net/netip"
 	"strconv"
@@ -750,7 +751,7 @@ func TestParseTargets(t *testing.T) {
 	}
 }
 
-func TestParseThrough(t *testing.T) {
+func TestParseEndpointSpec(t *testing.T) {
 	ok := map[string]string{
 		"188.114.98.5":          "188.114.98.5:2408",
 		"188.114.98.5:1701":     "188.114.98.5:1701",
@@ -758,19 +759,19 @@ func TestParseThrough(t *testing.T) {
 		"[2606:4700:d0::1]:500": "[2606:4700:d0::1]:500",
 	}
 	for spec, want := range ok {
-		got, err := parseThrough(spec)
+		got, err := parseEndpointSpec("-through", spec)
 		if err != nil {
-			t.Errorf("parseThrough(%q) failed: %v", spec, err)
+			t.Errorf("parseEndpointSpec(%q) failed: %v", spec, err)
 			continue
 		}
 		if got != want {
-			t.Errorf("parseThrough(%q) = %q, want %q", spec, got, want)
+			t.Errorf("parseEndpointSpec(%q) = %q, want %q", spec, got, want)
 		}
 	}
 
 	for _, spec := range []string{"", "nonsense", "188.114.98.0/24", "188.114.98.5:99999"} {
-		if _, err := parseThrough(spec); err == nil {
-			t.Errorf("parseThrough(%q) should have failed", spec)
+		if _, err := parseEndpointSpec("-through", spec); err == nil {
+			t.Errorf("parseEndpointSpec(%q) should have failed", spec)
 		}
 	}
 }
@@ -1106,5 +1107,56 @@ func TestTornDownReportBlock(t *testing.T) {
 	}
 	if strings.Contains(out, "# Best endpoint per node") {
 		t.Errorf("a torn-down endpoint must not be picked as best:\n%s", out)
+	}
+}
+
+type socksPipe struct {
+	io.Reader
+	out bytes.Buffer
+}
+
+func (p *socksPipe) Write(b []byte) (int, error) { return p.out.Write(b) }
+
+func socksRequest(atyp byte, addr []byte, port uint16) *socksPipe {
+	req := append([]byte{5, 1, 0, 5, 1, 0, atyp}, addr...)
+	req = append(req, byte(port>>8), byte(port))
+	return &socksPipe{Reader: bytes.NewReader(req)}
+}
+
+func TestSocksHandshake(t *testing.T) {
+	cases := map[string]*socksPipe{
+		"1.2.3.4:80":       socksRequest(socksIPv4, []byte{1, 2, 3, 4}, 80),
+		"example.com:443":  socksRequest(socksDomain, append([]byte{11}, "example.com"...), 443),
+		"[2606:4700::1]:8": socksRequest(socksIPv6, netip.MustParseAddr("2606:4700::1").AsSlice(), 8),
+	}
+	for want, pipe := range cases {
+		got, err := socksHandshake(pipe)
+		if err != nil {
+			t.Errorf("socksHandshake(%s) failed: %v", want, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("socksHandshake = %q, want %q", got, want)
+		}
+		if reply := pipe.out.Bytes(); len(reply) != 2 || reply[0] != socksVersion || reply[1] != socksNoAuth {
+			t.Errorf("method reply for %s = %v, want [5 0]", want, reply)
+		}
+	}
+}
+
+func TestSocksHandshakeRejects(t *testing.T) {
+	truncated := &socksPipe{Reader: bytes.NewReader([]byte{5, 1, 0, 5, 1, 0, socksIPv4, 1, 2})}
+	if _, err := socksHandshake(truncated); err == nil {
+		t.Error("a truncated request must fail")
+	}
+
+	// UDP ASSOCIATE, the one command a client may try that this server does not serve.
+	udp := &socksPipe{Reader: bytes.NewReader([]byte{5, 1, 0, 5, 3, 0, socksIPv4, 1, 2, 3, 4, 0, 80})}
+	if _, err := socksHandshake(udp); err == nil {
+		t.Error("a non-CONNECT command must fail")
+	}
+	reply := udp.out.Bytes()
+	if len(reply) != 12 || reply[3] != socksBadCmd {
+		t.Errorf("non-CONNECT reply = %v, want a %d at byte 3", reply, socksBadCmd)
 	}
 }

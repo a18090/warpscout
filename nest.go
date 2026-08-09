@@ -43,13 +43,13 @@ var outerAcct *account
 // the WARP port that answers everywhere.
 var throughDefaultPort = primaryWarpPorts[0]
 
-func parseThrough(spec string) (string, error) {
+func parseEndpointSpec(flagName, spec string) (string, error) {
 	if a, err := netip.ParseAddr(spec); err == nil {
 		return net.JoinHostPort(a.Unmap().String(), strconv.Itoa(throughDefaultPort)), nil
 	}
 	ap, err := netip.ParseAddrPort(spec)
 	if err != nil {
-		return "", fmt.Errorf("-through %q is neither an IP address nor ip:port", spec)
+		return "", fmt.Errorf("%s %q is neither an IP address nor ip:port", flagName, spec)
 	}
 	return net.JoinHostPort(ap.Addr().Unmap().String(), strconv.Itoa(int(ap.Port()))), nil
 }
@@ -58,7 +58,7 @@ func dialOuter(ctx context.Context, o options, timeout time.Duration) (*nest, er
 	if outerAcct == nil {
 		return nil, fmt.Errorf("%s holds no outer device: run \"warpscout register\" again", o.accountPath)
 	}
-	endpoint, err := parseThrough(o.through)
+	endpoint, err := parseEndpointSpec("-through", o.through)
 	if err != nil {
 		return nil, err
 	}

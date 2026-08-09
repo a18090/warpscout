@@ -20,7 +20,10 @@ type options struct {
 	tunPingCount   int
 	threshold      int
 	mtu            int
+	port           int
 	proto          string
+	listen         string
+	endpoint       string
 	output         string
 	conf           string
 	confType       string
@@ -142,6 +145,15 @@ var (
 		{"", "masque-attempts", "N", "how many times to re-check a failing MASQUE endpoint before calling it dead"},
 	}, netSpecs...)}
 
+	socksGroup = flagGroup{"SOCKS proxy", []flagSpec{
+		{"e", "endpoint", "ADDR", "WARP endpoint to tunnel through (IP or ip:port, as \"scan -best\" prints)"},
+		{"P", "port", "N", "port the SOCKS5 server listens on"},
+		{"l", "listen", "ADDR", "address the SOCKS5 server listens on"},
+		{"t", "timeout", "SEC", "per-request timeout"},
+		{"I", "interface", "NAME", "work through this interface (bind to device; Linux, may need CAP_NET_RAW)"},
+		{"a", "account", "FILE", "cached WARP account file"},
+	}}
+
 	findJunkI1Group = flagGroup{"AmneziaWG init packet", []flagSpec{
 		{"", "gen-i1", "PROTO", "generate the init packet per attempt: quic, dns, sip, stun or random"},
 		{"", "i1-sni", "HOST", "host to mimic in the generated I1 (default: a random well-known host)"},
@@ -255,6 +267,22 @@ func setupFindSNIFlags(fs *flag.FlagSet, o *options) {
 	o.tunPingCheck = true
 }
 
+func setupSocksFlags(fs *flag.FlagSet, o *options) {
+	intFlag(fs, &o.timeoutSec, 2, "t", "timeout")
+	strFlag(fs, &o.iface, "", "I", "interface")
+	strFlag(fs, &o.accountPath, defaultAccount, "a", "account")
+	strFlag(fs, &o.endpoint, "", "e", "endpoint")
+	strFlag(fs, &o.listen, defaultSocksListen, "l", "listen")
+	intFlag(fs, &o.port, defaultSocksPort, "P", "port")
+	strFlag(fs, &o.proto, protoWG, "p", "proto")
+	addAWGFlags(fs, o)
+	fs.StringVar(&masqueSNI, "masque-sni", masqueDefaultSNI, "")
+	fs.IntVar(&masqueAttempts, "masque-attempts", masqueDefaultAttempts, "")
+	fs.StringVar(&o.through, "through", "", "")
+	fs.StringVar(&o.innerProto, "inner-proto", protoWG, "")
+	o.perSubnet = 1
+}
+
 // Flags a command does not register stay at their zero value, so each step here
 // is a no-op for the commands it does not apply to.
 func applyCommonFlags(fs *flag.FlagSet, o *options) {
@@ -326,7 +354,7 @@ func validateThrough(fs *flag.FlagSet, o options) {
 			os.Exit(2)
 		}
 	}
-	if _, err := parseThrough(o.through); err != nil {
+	if _, err := parseEndpointSpec("-through", o.through); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
