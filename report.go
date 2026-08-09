@@ -450,10 +450,11 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 	for _, p := range pools {
 		subnet := p.String()
 		if picks := subnetEndpoints(working, p); len(picks) > 0 {
-			r := bestByPing(picks)
-			cells := append([]string{subnet, r.endpoint, r.epPingStr()}, metrics(r)...)
-			cells = append(cells, exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
-			rows = append(rows, pickRow{cells, statusOK, r.loss, r.sortPing()})
+			for _, r := range nodePicks(picks) {
+				cells := append([]string{subnet, r.endpoint, r.epPingStr()}, metrics(r)...)
+				cells = append(cells, exitRegion(r.exit), exitColo(r.exit), exitColoLocation(r.exit))
+				rows = append(rows, pickRow{cells, statusOK, r.loss, r.sortPing()})
+			}
 			continue
 		}
 		if picks := subnetEndpoints(torn, p); len(picks) > 0 {
@@ -477,7 +478,7 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 	headers = append(headers, "SEEN AS", "NODE", "NODE LOCATION")
 	accentCols := metricCols(2, 1+len(tunHeaders(ping))+len(speedHeaders(speed)))
 
-	fmt.Fprintln(w, "\n"+st.title.Render("Best endpoint per subnet ("+bestNote(ping)+")"))
+	fmt.Fprintln(w, "\n"+st.title.Render("Best endpoint per subnet and node ("+bestNote(ping)+")"))
 	t := table.New().
 		Border(lipgloss.RoundedBorder()).
 		BorderStyle(st.dim).
@@ -551,8 +552,8 @@ func speedTargets(results []endpointResult) []endpointResult {
 		}
 	}
 	for _, p := range pools {
-		if picks := subnetEndpoints(working, p); len(picks) > 0 {
-			add(bestByPing(picks))
+		for _, r := range nodePicks(subnetEndpoints(working, p)) {
+			add(r)
 		}
 	}
 	for _, r := range nodePicks(working) {

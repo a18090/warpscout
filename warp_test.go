@@ -1096,6 +1096,42 @@ func TestReportSpeedColumn(t *testing.T) {
 	}
 }
 
+func TestPicksTablePerNode(t *testing.T) {
+	defer func(saved []netip.Prefix) { pools = saved }(pools)
+	pools, _ = parseTargets("8.47.69.0/24")
+
+	ok := func(addr string, ms int, colo string) endpointResult {
+		return endpointResult{
+			ip:       netip.MustParseAddr(addr),
+			endpoint: addr + ":2408",
+			epPing:   time.Duration(ms) * time.Millisecond,
+			exit:     metaResult{loc: "RU", colo: colo},
+			ok:       true,
+			durable:  true,
+		}
+	}
+	working := []endpointResult{
+		ok("8.47.69.10", 3, "DME"),
+		ok("8.47.69.11", 9, "FRA"),
+		ok("8.47.69.12", 20, "FRA"), // same node, slower - not shown
+	}
+
+	var buf bytes.Buffer
+	r := lipgloss.NewRenderer(&buf)
+	r.SetColorProfile(termenv.Ascii)
+	writePicksTable(&buf, newConStyles(r), working, nil, false)
+
+	out := buf.String()
+	for _, want := range []string{"8.47.69.10:2408", "8.47.69.11:2408"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("picks table missing %s:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "8.47.69.12:2408") {
+		t.Errorf("picks table shows a slower endpoint of an already listed node:\n%s", out)
+	}
+}
+
 func TestSpeedTargets(t *testing.T) {
 	defer func(saved []netip.Prefix) { pools = saved }(pools)
 	pools, _ = parseTargets("8.47.69.0/24,188.114.96.0/24")
