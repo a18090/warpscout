@@ -24,6 +24,7 @@
 - [Scripting](#scripting)
 - [AmneziaWG obfuscation](#amneziawg-obfuscation)
 - [MASQUE](#masque)
+- [WARP-in-WARP](#warp-in-warp)
 - [Docker](#docker-1)
 - [Troubleshooting](#troubleshooting)
 - [Credits](#credits)
@@ -269,7 +270,7 @@ There are two pings, and they sit in separate columns:
 
 | Column          | What it measures                                                                                   | Shown            |
 | --------------- | ---------------------------------------------------------------------------------------------------- | ---------------- |
-| `ENDPOINT PING` | ICMP ping to the endpoint address itself, straight from this host. No tunnel involved.             | always           |
+| `ENDPOINT PING` | ICMP ping to the endpoint address itself, straight from this host - or from inside the outer tunnel under `-through`. | always           |
 | `TUN PING`      | Round-trip time to `1.1.1.1` **through** the tunnel, next to the `LOSS` measured in the same burst. | with `-tun-ping` |
 
 `ENDPOINT PING` is the cheap one and says only how far away the address is; it has nothing to do with the tunnel.
@@ -485,6 +486,46 @@ warpscout scan -p masque-h2 -conf usque.json
 A `masque-h2` run fills usque's `endpoint_h2_v4`/`endpoint_h2_v6` fields. `-conf-type mihomo` works for both MASQUE modes: the TCP one is the same `type: masque` with `network: h2`.
 
 `-table-off`, `-mtu` and `-dns`/`-no-dns` have no counterpart in usque's `config.json` and are ignored here - under `-conf-type mihomo` the DNS flags work as usual.
+
+## WARP-in-WARP
+
+`-through` runs the whole scan from inside another WARP tunnel. The inner tunnel leaves Cloudflare's network wherever the outer one does, so `SEEN AS` shows the region of the outer endpoint's node rather than yours.
+
+If you do not yet know which foreign nodes are within reach, start with a plain scan and no `-node`:
+
+```sh
+warpscout scan -p awg
+```
+
+If you already know the node you want, scan with `-node` and `-best` to pick an endpoint in one step:
+
+```sh
+warpscout scan -p awg -node FRA -best # 188.114.97.177:2408, for example
+```
+
+Then pass that outer endpoint to a second run through `-through`:
+
+```sh
+warpscout scan -p awg -through 188.114.97.177:2408
+```
+
+The first run finds an endpoint on a foreign node, the second scans through it. Every endpoint the second run reports comes out in that node's country, and `-conf` from it only reproduces that region when the config is run over the same outer endpoint.
+
+`-p` keeps the meaning it has everywhere else: the protocol of the tunnel that crosses your network. Under `-through` that is the outer tunnel - the only one DPI ever sees:
+
+```
+[host] --( -proto: over your network, DPI sees this )--> outer endpoint --( -inner-proto: inside the outer tunnel, invisible )--> scanned endpoints
+```
+
+If a plain scan on this network needs `-p awg`, so does a nested one.
+
+The only new flag here is `-inner-proto`, and it defaults to `wg`: inside the outer tunnel obfuscation is (for now) not needed and only costs MTU.
+
+`register` sets up a second WireGuard device for the outer tunnel: WARP refuses to nest two tunnels sharing a private key. If your account file was created by a version older than `0.12.0`, register again with `warpscout register`.
+
+The scan is capped at `-jt 1`, because the inner tunnels share a single outer device. Even at `-jt 3` the scan produced false negatives, thanks to a Cloudflare quirk: connections get rate-limited.
+
+`ENDPOINT PING` under `-through` is measured along `[host] --> [outer endpoint] --> [inner endpoint]`, so the hop to the outer endpoint is part of the figure. Having that measurement is what lets `-best` pick the best endpoint.
 
 ## Docker
 
