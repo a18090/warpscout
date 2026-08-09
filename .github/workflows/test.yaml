@@ -3,9 +3,9 @@ name: test
 on:
   push:
     branches: [master]
-    paths-ignore: ["**.md", "LICENSE*"]
+    paths-ignore: ["**.md", "LICENSE*", ".github/workflows/release.yaml", ".github/workflows/docker-build.yaml"]
   pull_request:
-    paths-ignore: ["**.md", "LICENSE*"]
+    paths-ignore: ["**.md", "LICENSE*", ".github/workflows/release.yaml", ".github/workflows/docker-build.yaml"]
   workflow_dispatch:
 
 permissions:
