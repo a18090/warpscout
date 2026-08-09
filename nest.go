@@ -90,10 +90,10 @@ func dialOuter(ctx context.Context, o options, timeout time.Duration) (*nest, er
 	}, nil
 }
 
-// baseUAPI, peerUAPI and newIPStack read the account globals (warp.go), so the
-// outer device's key and addresses go in around those calls and come straight
-// back out - everything after this is the inner scan, on the scanning account.
-func dialOuterWithItsKeys(ctx context.Context, run protoRun, endpoint string, timeout time.Duration) (tunnel, error) {
+// baseUAPI, peerUAPI, newIPStack and the config renderers all read the account
+// globals (warp.go), so the outer device's key and addresses go in around those
+// calls and come straight back out - everything else runs on the scanning account.
+func withOuterKeys(fn func() error) error {
 	priv, pub, v4, v6 := warpPrivateKey, warpPublicKey, warpAddress, warpAddressV6
 	warpPrivateKey, warpPublicKey = outerAcct.PrivateKey, outerAcct.PeerPublicKey
 	if outerAcct.IPv4 != "" {
@@ -105,16 +105,24 @@ func dialOuterWithItsKeys(ctx context.Context, run protoRun, endpoint string, ti
 	defer func() {
 		warpPrivateKey, warpPublicKey, warpAddress, warpAddressV6 = priv, pub, v4, v6
 	}()
+	return fn()
+}
 
-	tn, err := newTunnel(run)
-	if err != nil {
-		return nil, fmt.Errorf("outer tunnel: %w", err)
-	}
-	if !tn.handshake(ctx, endpoint, timeout) {
-		tn.Close()
-		return nil, fmt.Errorf("outer endpoint %s did not answer over %s - pick one a plain scan found working", endpoint, run.name)
-	}
-	return tn, nil
+func dialOuterWithItsKeys(ctx context.Context, run protoRun, endpoint string, timeout time.Duration) (tunnel, error) {
+	var tn tunnel
+	err := withOuterKeys(func() error {
+		t, err := newTunnel(run)
+		if err != nil {
+			return fmt.Errorf("outer tunnel: %w", err)
+		}
+		if !t.handshake(ctx, endpoint, timeout) {
+			t.Close()
+			return fmt.Errorf("outer endpoint %s did not answer over %s - pick one a plain scan found working", endpoint, run.name)
+		}
+		tn = t
+		return nil
+	})
+	return tn, err
 }
 
 // The nested answer to pingHost: ICMP from inside the outer tunnel to the inner

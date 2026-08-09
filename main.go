@@ -347,7 +347,11 @@ func writeConfFile(opts options, ph phaseResult) {
 	}
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))
 	if outer != nil {
-		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("  it only reaches the region above when run over %s", outer.label)))
+		note := fmt.Sprintf("  it only reaches the region above when run over %s", outer.label)
+		if opts.confType == confTypeMihomo {
+			note = fmt.Sprintf("  it chains through %s itself (dialer-proxy)", outer.label)
+		}
+		fmt.Fprintln(os.Stderr, errPal.dim(note))
 	}
 	if ph.run.isMASQUE() && opts.confType != confTypeMihomo {
 		if _, port, err := net.SplitHostPort(best.endpoint); err == nil {

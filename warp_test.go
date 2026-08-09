@@ -293,6 +293,60 @@ func TestRenderMihomoConf(t *testing.T) {
 	if wg := string(conf); strings.Contains(wg, "amnezia-wg-option") {
 		t.Errorf("plain WireGuard config must not carry junk params:\n%s", wg)
 	}
+	if strings.Contains(awg, "dialer-proxy") {
+		t.Errorf("a plain run must render one proxy, not a chain:\n%s", awg)
+	}
+}
+
+func TestRenderMihomoConfChained(t *testing.T) {
+	outerAcct = &account{
+		PrivateKey:    "outerPriv=",
+		PeerPublicKey: "outerPub=",
+		IPv4:          "172.16.0.9",
+		IPv6:          "2606:4700:110:1::9",
+	}
+	outer = &nest{run: protoRun{kindAWG, protoAWG}, endpoint: "188.114.97.177:2408", label: "188.114.97.177:2408 (awg)"}
+	defer func() { outer, outerAcct = nil, nil }()
+
+	conf, err := renderMihomoConf(options{confType: confTypeMihomo}, "8.47.69.130:2408", protoRun{kindWG, protoWG})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(conf)
+	for _, want := range []string{
+		"- name: \"AWG WARP OUTER\"",
+		"server: 188.114.97.177",
+		"private-key: outerPriv=",
+		"public-key: outerPub=",
+		"ip: 172.16.0.9",
+		"- name: \"WG WARP\"",
+		"server: 8.47.69.130",
+		"private-key: " + warpPrivateKey,
+		"mtu: 1220",
+		"dialer-proxy: \"AWG WARP OUTER\"",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("chained config missing %q:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "- name:"); n != 2 {
+		t.Errorf("chained config has %d proxies, want 2:\n%s", n, got)
+	}
+	// The chain resolves at its far end, so the carrier gets no resolvers.
+	if n := strings.Count(got, "dns: ["); n != 1 {
+		t.Errorf("chained config carries %d dns lines, want 1:\n%s", n, got)
+	}
+	// The dialer-proxy must sit on the inner proxy, which is the second block.
+	if strings.Index(got, "dialer-proxy") < strings.Index(got, "- name: \"WG WARP\"") {
+		t.Errorf("dialer-proxy belongs to the inner proxy:\n%s", got)
+	}
+	// Rendering must not leave the outer device's keys in the globals.
+	if warpPrivateKey == "outerPriv=" {
+		t.Error("outer keys leaked into the account globals")
+	}
+	if strings.Contains(got, "mtu: 1280") {
+		t.Errorf("only the inner proxy takes an MTU without -mtu:\n%s", got)
+	}
 }
 
 // The proxy name has to name the protocol and nothing else: several configs land

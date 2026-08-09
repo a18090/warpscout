@@ -12,6 +12,13 @@ import (
 func renderConf(o options, endpoint string, run protoRun) string {
 	var b strings.Builder
 
+	// A .conf cannot express the chain - the client builds it - so the inner
+	// tunnel of a nested run says so instead of silently exiting somewhere else.
+	if outer != nil {
+		fmt.Fprintf(&b, "# Inner tunnel of a WARP-in-WARP chain: it only reaches the region\n")
+		fmt.Fprintf(&b, "# it was scanned in when run over %s.\n\n", outer.label)
+	}
+
 	fmt.Fprintf(&b, "[Interface]\n")
 	if o.ipv6 {
 		fmt.Fprintf(&b, "Address = %s/128\n", warpAddressV6)
@@ -127,30 +134,82 @@ func mihomoName(run protoRun) string {
 	return "WG WARP"
 }
 
-func renderMihomoConf(o options, endpoint string, run protoRun) ([]byte, error) {
-	host, port, err := net.SplitHostPort(endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("endpoint %q: %w", endpoint, err)
-	}
+const mihomoOuterSuffix = " OUTER"
 
+func renderMihomoConf(o options, endpoint string, run protoRun) ([]byte, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "proxies:\n")
-	fmt.Fprintf(&b, "- name: \"%s\"\n", mihomoName(run))
-	fmt.Fprintf(&b, "  server: %s\n", host)
-	fmt.Fprintf(&b, "  port: %s\n", port)
-	if err := mihomoPeer(&b, run, o.ipv6); err != nil {
-		return nil, err
-	}
-	if o.mtu > 0 {
-		fmt.Fprintf(&b, "  mtu: %d\n", o.mtu)
-	}
-	fmt.Fprintf(&b, "  udp: true\n")
-	if dns := confDNS(o); dns != "" {
-		fmt.Fprintf(&b, "  remote-dns-resolve: true\n")
-		fmt.Fprintf(&b, "  dns: [%s]\n", dns)
+
+	if outer == nil {
+		block, err := mihomoProxy(o, mihomoName(run), endpoint, run, o.mtu, confDNS(o))
+		if err != nil {
+			return nil, err
+		}
+		b.WriteString(indentBlock(block))
+		return []byte(b.String()), nil
 	}
 
+	// mihomo expresses the chain itself: the outer tunnel is a proxy of its own
+	// and the inner one dials through it. The outer carries no DNS - it is only
+	// the carrier, and the resolvers belong at the end of the chain.
+	outerName := mihomoName(outer.run) + mihomoOuterSuffix
+	var block string
+	err := withOuterKeys(func() error {
+		var err error
+		block, err = mihomoProxy(o, outerName, outer.endpoint, outer.run, o.mtu, "")
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	b.WriteString(indentBlock(block))
+
+	block, err = mihomoProxy(o, mihomoName(run), endpoint, run, nestedMTU(o.mtu), confDNS(o))
+	if err != nil {
+		return nil, err
+	}
+	b.WriteString(indentBlock(block + fmt.Sprintf("  dialer-proxy: \"%s\"\n", outerName)))
 	return []byte(b.String()), nil
+}
+
+// The proxy writers lay a block out at column 0; the sequence itself sits under
+// proxies:, so every line of it moves right by one level.
+func indentBlock(s string) string {
+	return "  " + strings.ReplaceAll(strings.TrimSuffix(s, "\n"), "\n", "\n  ") + "\n"
+}
+
+// The inner WireGuard packet rides as UDP inside the outer tunnel, so it cannot
+// be left at the client's default: at full MTU the handshake still completes and
+// data dies silently (the same nestedOverhead tunnel.go subtracts).
+func nestedMTU(mtu int) int {
+	if mtu == 0 {
+		mtu = tunnelMTU
+	}
+	return mtu - nestedOverhead
+}
+
+func mihomoProxy(o options, name, endpoint string, run protoRun, mtu int, dns string) (string, error) {
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("endpoint %q: %w", endpoint, err)
+	}
+
+	b := &strings.Builder{}
+	fmt.Fprintf(b, "- name: \"%s\"\n", name)
+	fmt.Fprintf(b, "  server: %s\n", host)
+	fmt.Fprintf(b, "  port: %s\n", port)
+	if err := mihomoPeer(b, run, o.ipv6); err != nil {
+		return "", err
+	}
+	if mtu > 0 {
+		fmt.Fprintf(b, "  mtu: %d\n", mtu)
+	}
+	fmt.Fprintf(b, "  udp: true\n")
+	if dns != "" {
+		fmt.Fprintf(b, "  remote-dns-resolve: true\n")
+		fmt.Fprintf(b, "  dns: [%s]\n", dns)
+	}
+	return b.String(), nil
 }
 
 func mihomoPeer(b *strings.Builder, run protoRun, ipv6 bool) error {
