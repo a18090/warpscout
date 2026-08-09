@@ -479,7 +479,7 @@ func TestExpandMasquePools(t *testing.T) {
 		name  string
 		pool  []netip.Prefix
 		count int
-	}{{"v4", masquePoolsV4, 2}, {"v6", masquePoolsV6, 2}} {
+	}{{"v4", masquePoolsV4, len(masquePoolsV4)}, {"v6", masquePoolsV6, len(masquePoolsV6)}} {
 		pools = tc.pool
 		for _, sample := range []int{0, 1, 5} {
 			if got := expandPools(sample); len(got) != tc.count {

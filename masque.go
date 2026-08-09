@@ -47,9 +47,12 @@ const (
 	masqueDefaultAttempts = 3
 )
 
-// MASQUE is served from two anycast addresses per family, not from the WireGuard
+// MASQUE is served from the ::1 and ::2 of each block, not from the WireGuard
 // pools: measured, every other address in 162.159.198.0/24 and every wg pool
-// address answers QUIC but rejects the TLS handshake outright.
+// address answers QUIC but rejects the TLS handshake outright. v6 has two such
+// blocks and so four addresses - 16 random addresses sampled out of either /120
+// answered nothing, while all four of these worked (20-21 of 28 ip:port pairs,
+// the usual flap), reproduced on two hosts in different regions.
 var (
 	masquePoolsV4 = []netip.Prefix{
 		netip.MustParsePrefix("162.159.198.1/32"),
@@ -58,6 +61,8 @@ var (
 	masquePoolsV6 = []netip.Prefix{
 		netip.MustParsePrefix("2606:4700:103::1/128"),
 		netip.MustParsePrefix("2606:4700:103::2/128"),
+		netip.MustParsePrefix("2606:4700:104::1/128"),
+		netip.MustParsePrefix("2606:4700:104::2/128"),
 	}
 )
 
@@ -71,10 +76,13 @@ var (
 		netip.MustParsePrefix("162.159.198.0/24"),
 		netip.MustParsePrefix("162.159.199.0/24"),
 	}
-	// Only the 103 block answers: measured on two v6-capable hosts, every sampled
-	// address in 2606:4700:102::/120 came back dead on both.
+	// The v6 side is two whole /48s, not the /120 the QUIC addresses sit in: every
+	// sampled ip:port pair worked across both, on two hosts in different regions.
+	// The neighbouring blocks are dead on both - 101, 102 (Zero Trust), 105, 106
+	// and the wg pools - so the range really is these two.
 	masqueH2PoolsV6 = []netip.Prefix{
-		netip.MustParsePrefix("2606:4700:103::/120"),
+		netip.MustParsePrefix("2606:4700:103::/48"),
+		netip.MustParsePrefix("2606:4700:104::/48"),
 	}
 )
 
