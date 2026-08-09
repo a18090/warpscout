@@ -347,7 +347,7 @@ func writeConfFile(opts options, ph phaseResult) {
 	}
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))
 	if outer != nil {
-		note := fmt.Sprintf("  it only reaches the region above when run over %s", outer.label)
+		note := fmt.Sprintf("  it holds both tunnels of the chain (outer %s) - split it in two before use", outer.label)
 		if opts.confType == confTypeMihomo {
 			note = fmt.Sprintf("  it chains through %s itself (dialer-proxy)", outer.label)
 		}

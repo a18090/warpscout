@@ -10,14 +10,76 @@ import (
 )
 
 func renderConf(o options, endpoint string, run protoRun) string {
-	var b strings.Builder
-
-	// A .conf cannot express the chain - the client builds it - so the inner
-	// tunnel of a nested run says so instead of silently exiting somewhere else.
-	if outer != nil {
-		fmt.Fprintf(&b, "# Inner tunnel of a WARP-in-WARP chain: it only reaches the region\n")
-		fmt.Fprintf(&b, "# it was scanned in when run over %s.\n\n", outer.label)
+	if outer == nil {
+		return renderIface(o, endpoint, run)
 	}
+	return renderChainConf(o, endpoint, run)
+}
+
+// A .conf cannot express a chain - the client builds it - so a nested run writes
+// both interfaces into the one file and leaves the wiring to the reader.
+func renderChainConf(o options, endpoint string, run protoRun) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "# WARP-in-WARP chain: two interfaces in one file, split it in two before\n")
+	fmt.Fprintf(&b, "# using them. The inner tunnel only reaches the region it was scanned in\n")
+	fmt.Fprintf(&b, "# while its packets travel inside the outer one - routing that is the\n")
+	fmt.Fprintf(&b, "# client's job, not the config's.\n")
+	if o.ipv6 && warpAddressV6 == outerAddress(true) {
+		fmt.Fprintf(&b, "#\n# Both interfaces carry the same Address, which handshakes and then passes\n")
+		fmt.Fprintf(&b, "# nothing: this account file predates stored IPv6 addresses. Re-register.\n")
+	}
+	fmt.Fprintf(&b, "\n")
+
+	// The resolvers belong at the far end of the chain, and the outer tunnel's
+	// own routes are the client's business either way.
+	outerOpts := o
+	outerOpts.noDNS = true
+	fmt.Fprintf(&b, "# --- outer: %s ---\n", outer.label)
+	_ = withOuterKeys(func() error {
+		b.WriteString(renderIface(outerOpts, outer.endpoint, outer.run))
+		return nil
+	})
+
+	innerOpts := o
+	innerOpts.mtu = nestedMTU(o.mtu)
+	fmt.Fprintf(&b, "\n# --- inner: %s (%s), inside the tunnel above ---\n", endpoint, run.name)
+	b.WriteString(withChainAddr(o.ipv6, func() string { return renderIface(innerOpts, endpoint, run) }))
+	return b.String()
+}
+
+// Two interfaces holding the same Address handshake and then pass nothing at
+// all - measured on the hand-built chain. Both halves only collide on an account
+// file written before the addresses were stored, where each falls back to the
+// same constant; Cloudflare ignores the tunnel-local v4 address, so moving the
+// inner one off it is free. There is no such freedom on v6 - it is a real routed
+// per-device address - so that stays as it is and the file says so.
+const chainInnerAddress = "172.16.0.3"
+
+func withChainAddr(ipv6 bool, fn func() string) string {
+	if ipv6 || warpAddress != outerAddress(false) {
+		return fn()
+	}
+	prev := warpAddress
+	warpAddress = chainInnerAddress
+	defer func() { warpAddress = prev }()
+	return fn()
+}
+
+func outerAddress(ipv6 bool) string {
+	if ipv6 {
+		if outerAcct.IPv6 != "" {
+			return outerAcct.IPv6
+		}
+		return warpAddressV6
+	}
+	if outerAcct.IPv4 != "" {
+		return outerAcct.IPv4
+	}
+	return warpAddress
+}
+
+func renderIface(o options, endpoint string, run protoRun) string {
+	var b strings.Builder
 
 	fmt.Fprintf(&b, "[Interface]\n")
 	if o.ipv6 {

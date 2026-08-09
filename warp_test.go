@@ -239,6 +239,44 @@ func TestRenderConf(t *testing.T) {
 	}
 }
 
+func TestRenderConfChained(t *testing.T) {
+	outerAcct = &account{PrivateKey: "outerPriv=", PeerPublicKey: "outerPub=", IPv4: "172.16.0.9"}
+	outer = &nest{run: protoRun{kindAWG, protoAWG}, endpoint: "188.114.97.177:2408", label: "188.114.97.177:2408 (awg)"}
+	defer func() { outer, outerAcct = nil, nil }()
+
+	got := renderConf(options{}, "8.47.69.130:2408", protoRun{kindWG, protoWG})
+	for _, want := range []string{
+		"Address = 172.16.0.9/32", "PrivateKey = outerPriv=", "Endpoint = 188.114.97.177:2408", "Jc = 6",
+		"Address = " + warpAddress + "/32", "PrivateKey = " + warpPrivateKey, "Endpoint = 8.47.69.130:2408",
+		"MTU = 1220",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("chained config missing %q:\n%s", want, got)
+		}
+	}
+	if n := strings.Count(got, "[Interface]"); n != 2 {
+		t.Errorf("chained config has %d interfaces, want 2:\n%s", n, got)
+	}
+	// The resolvers belong to the inner tunnel, the far end of the chain.
+	if n := strings.Count(got, "DNS = "); n != 1 {
+		t.Errorf("chained config carries %d DNS lines, want 1:\n%s", n, got)
+	}
+	if warpPrivateKey == "outerPriv=" {
+		t.Error("outer keys leaked into the account globals")
+	}
+
+	// An account file predating stored addresses falls back to the same constant
+	// for both devices, and two interfaces on one Address pass no data.
+	outerAcct.IPv4 = ""
+	got = renderConf(options{}, "8.47.69.130:2408", protoRun{kindWG, protoWG})
+	if !strings.Contains(got, "Address = "+chainInnerAddress+"/32") {
+		t.Errorf("colliding addresses not separated:\n%s", got)
+	}
+	if warpAddress == chainInnerAddress {
+		t.Error("the inner address leaked into the account globals")
+	}
+}
+
 func TestRenderMihomoConf(t *testing.T) {
 	conf, err := renderMihomoConf(options{confType: confTypeMihomo}, "188.114.98.5:2408", protoRun{kindAWG, protoAWG})
 	if err != nil {
