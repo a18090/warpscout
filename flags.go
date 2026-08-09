@@ -32,6 +32,8 @@ type options struct {
 	genI1          string
 	i1Host         string
 	target         string
+	through        string
+	innerProto     string
 	node           string
 	country        string
 	targets        []netip.Prefix
@@ -81,6 +83,11 @@ var (
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
 	}, netSpecs...)}
+
+	nestGroup = flagGroup{"WARP-in-WARP", []flagSpec{
+		{"", "through", "ADDR", "scan from inside a tunnel to this endpoint (IP or ip:port, as -best prints): results then exit through that endpoint's region (-tunnel-jobs drops to 1)"},
+		{"", "inner-proto", "wg|awg", "protocol of the tunnels being scanned, which run inside the -through one where DPI cannot see them; -proto stays the outer tunnel, the one that crosses your network"},
+	}}
 
 	masqueGroup = flagGroup{"MASQUE", []flagSpec{
 		{"", "masque-sni", "HOST", "SNI to present to the MASQUE endpoint; a different name often gets through DPI"},
@@ -203,6 +210,8 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	fs.StringVar(&o.confType, "conf-type", confTypeNative, "")
 	fs.StringVar(&masqueSNI, "masque-sni", masqueDefaultSNI, "")
 	fs.IntVar(&masqueAttempts, "masque-attempts", masqueDefaultAttempts, "")
+	fs.StringVar(&o.through, "through", "", "")
+	fs.StringVar(&o.innerProto, "inner-proto", protoWG, "")
 	fs.BoolVar(&o.tableOff, "table-off", false, "")
 	fs.IntVar(&o.mtu, "mtu", 0, "")
 	fs.StringVar(&o.dns, "dns", "", "")
@@ -297,6 +306,43 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	applyNode(o)
 	rejectMasqueFilters(*o)
 	validateMasqueAttempts()
+	validateThrough(fs, *o)
+	applyNestedJobs(fs, o)
+}
+
+// Both tunnels are WireGuard: only the wg pools hand out a choice of node, which
+// is the whole point of nesting, and MASQUE gives one node per network.
+func validateThrough(fs *flag.FlagSet, o options) {
+	if o.through == "" {
+		if explicitFlags(fs)["inner-proto"] {
+			fmt.Fprintln(os.Stderr, "-inner-proto needs -through ADDR")
+			os.Exit(2)
+		}
+		return
+	}
+	for _, f := range []struct{ name, value string }{{"-proto", o.proto}, {"-inner-proto", o.innerProto}} {
+		if f.value != protoWG && f.value != protoAWG {
+			fmt.Fprintf(os.Stderr, "-through nests two WireGuard tunnels: %s must be %s or %s, not %q\n", f.name, protoWG, protoAWG, f.value)
+			os.Exit(2)
+		}
+	}
+	if _, err := parseThrough(o.through); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+}
+
+// Every inner tunnel shares the one outer device and its one netstack, and that
+// is the bottleneck: measured on the same 28 endpoints, 28/28 worked at 1 worker,
+// 12/28 at 3 and 3/28 at the usual 10, the rest reported as torn down. An
+// explicit -jt still wins - the user may be nesting through a fatter path.
+const nestedTunnelJobs = 1
+
+func applyNestedJobs(fs *flag.FlagSet, o *options) {
+	if o.through == "" || explicitFlags(fs)["jt"] || explicitFlags(fs)["tunnel-jobs"] {
+		return
+	}
+	o.tunnelParallel = nestedTunnelJobs
 }
 
 // find-sni is a MASQUE-only command, but it has two transports to search now,

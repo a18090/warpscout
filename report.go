@@ -289,7 +289,12 @@ const (
 func writeHeader(w io.Writer, working, probed int, ping, speed bool) {
 	fmt.Fprintf(w, "# WARP endpoints: %d working / %d probed\n", working, probed)
 	fmt.Fprintf(w, "# %s\n", sortNote(ping))
-	fmt.Fprintln(w, "# ENDPOINT PING = ICMP ping to the endpoint address from this host, no tunnel involved")
+	if outer != nil {
+		fmt.Fprintf(w, "# Scanned from inside a tunnel to %s - every endpoint here exits through that node's region\n", outer.label)
+		fmt.Fprintln(w, "# ENDPOINT PING = ICMP from inside that tunnel to the endpoint, so it carries the outer hop too")
+	} else {
+		fmt.Fprintln(w, "# ENDPOINT PING = ICMP ping to the endpoint address from this host, no tunnel involved")
+	}
 	if ping {
 		fmt.Fprintf(w, "# TUN PING / LOSS = RTT and packet loss measured inside the tunnel, to %s\n", pingTarget)
 	}
@@ -355,7 +360,7 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 
 	fmt.Fprintln(w, banner(st))
 	fmt.Fprintln(w)
-	fmt.Fprintf(w, "Proto:     %s\n", st.accent.Render(strings.ToUpper(ph.run.name)))
+	fmt.Fprintf(w, "Proto:     %s\n", st.accent.Render(protoLine(ph.run)))
 	writeJunkNote(w, st, ph.run)
 	fmt.Fprintf(w, "Nodes:     %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.colo }, noFlag)))
 	fmt.Fprintf(w, "Seen as:   %s\n", st.accent.Render(uniqueSorted(working, func(r endpointResult) string { return r.exit.loc }, flagEmoji)))
@@ -364,7 +369,18 @@ func writeConsole(w io.Writer, ph phaseResult, r *lipgloss.Renderer, ping bool) 
 	writePicksTable(w, st, working, torn, ping)
 }
 
+func protoLine(run protoRun) string {
+	name := strings.ToUpper(run.name)
+	if outer == nil {
+		return name
+	}
+	return fmt.Sprintf("%s via %s (%s)", name, strings.ToUpper(outer.run.name), outer.endpoint)
+}
+
 func writeJunkNote(w io.Writer, st conStyles, run protoRun) {
+	if outer != nil && outer.run.isAWG() {
+		run = outer.run
+	}
 	if !run.isAWG() {
 		return
 	}

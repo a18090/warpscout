@@ -750,6 +750,31 @@ func TestParseTargets(t *testing.T) {
 	}
 }
 
+func TestParseThrough(t *testing.T) {
+	ok := map[string]string{
+		"188.114.98.5":          "188.114.98.5:2408",
+		"188.114.98.5:1701":     "188.114.98.5:1701",
+		"2606:4700:d0::1":       "[2606:4700:d0::1]:2408",
+		"[2606:4700:d0::1]:500": "[2606:4700:d0::1]:500",
+	}
+	for spec, want := range ok {
+		got, err := parseThrough(spec)
+		if err != nil {
+			t.Errorf("parseThrough(%q) failed: %v", spec, err)
+			continue
+		}
+		if got != want {
+			t.Errorf("parseThrough(%q) = %q, want %q", spec, got, want)
+		}
+	}
+
+	for _, spec := range []string{"", "nonsense", "188.114.98.0/24", "188.114.98.5:99999"} {
+		if _, err := parseThrough(spec); err == nil {
+			t.Errorf("parseThrough(%q) should have failed", spec)
+		}
+	}
+}
+
 func TestExpandTargets(t *testing.T) {
 	defer func(saved []netip.Prefix) { pools = saved }(pools)
 

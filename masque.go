@@ -369,7 +369,7 @@ func newMasqueTunnel(h2 bool) (*masqueTunnel, error) {
 	if err != nil {
 		return nil, err
 	}
-	dev, stack, err := newIPStack(local)
+	dev, stack, err := newIPStack(local, tunnelMTU)
 	if err != nil {
 		return nil, err
 	}

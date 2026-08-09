@@ -24,8 +24,8 @@ type ipStack struct {
 	client *http.Client
 }
 
-func newIPStack(local []netip.Addr) (tun.Device, *ipStack, error) {
-	tunDev, tnet, err := netstack.CreateNetTUN(local, []netip.Addr{netip.MustParseAddr(pingTarget)}, tunnelMTU)
+func newIPStack(local []netip.Addr, mtu int) (tun.Device, *ipStack, error) {
+	tunDev, tnet, err := netstack.CreateNetTUN(local, []netip.Addr{netip.MustParseAddr(pingTarget)}, mtu)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -64,15 +64,22 @@ func newWGTunnel(awg bool) (*wgTunnel, error) {
 		return nil, err
 	}
 
+	mtu := tunnelMTU
+	if outer != nil {
+		mtu = tunnelMTU - nestedOverhead
+	}
 	tunDev, stack, err := newIPStack([]netip.Addr{
 		netip.MustParseAddr(warpAddress),
 		netip.MustParseAddr(warpAddressV6),
-	})
+	}, mtu)
 	if err != nil {
 		return nil, err
 	}
 	bind := conn.Bind(conn.NewDefaultBind())
-	if scanInterface != "" {
+	switch {
+	case outer != nil:
+		bind = newTunnelBind(outer)
+	case scanInterface != "":
 		bind = newDeviceBind(scanInterface)
 	}
 	dev := device.NewDevice(tunDev, bind, device.NewLogger(device.LogLevelSilent, ""))
@@ -280,9 +287,7 @@ func resolveMetaAddr(ctx context.Context, tnet *netstack.Net) bool {
 	return true
 }
 
-// The tunnel carries both families, but the meta fetch stays on v4: it is where
-// every reported number was measured, and v6 only works once the account file
-// carries the device's own address.
+// The tunnel carries both families, but the meta fetch stays on v4
 func preferV4(ips []string) string {
 	for _, ip := range ips {
 		if a, err := netip.ParseAddr(ip); err == nil && a.Is4() {

@@ -35,7 +35,7 @@ var commands = []command{
 			"only the full tunnel check tells them apart. Those endpoints flap, hence",
 			"-masque-attempts, and the SNI is what gets them past DPI, hence -masque-sni.",
 		},
-		groups: []flagGroup{scanGroup, protoGroup, awgGroup, masqueGroup, outputGroup},
+		groups: []flagGroup{scanGroup, protoGroup, awgGroup, masqueGroup, nestGroup, outputGroup},
 		setup:  setupScanFlags,
 		run:    runScanCmd,
 	},

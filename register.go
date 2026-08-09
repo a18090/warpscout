@@ -42,6 +42,7 @@ type account struct {
 	IPv4          string         `json:"ipv4,omitempty"`
 	IPv6          string         `json:"ipv6,omitempty"`
 	Masque        *masqueAccount `json:"masque,omitempty"`
+	Outer         *account       `json:"outer,omitempty"`
 }
 
 type masqueAccount struct {
@@ -103,6 +104,7 @@ func applyAccount(a account) {
 		warpAddressV6 = a.IPv6
 	}
 	masqueAcct = a.Masque
+	outerAcct = a.Outer
 }
 
 type regResp struct {
@@ -193,7 +195,21 @@ func mintAccount(ctx context.Context, client *http.Client, existing account) (ac
 		return account{}, err
 	}
 	a.Masque = mintMasque(ctx, client, existing.Masque)
+	a.Outer = mintOuter(ctx, client, existing.Outer)
 	return a, nil
+}
+
+func mintOuter(ctx context.Context, client *http.Client, existing *account) *account {
+	var prev account
+	if existing != nil {
+		prev = *existing
+	}
+	o, err := mintWGAccount(ctx, client, prev)
+	if err == nil {
+		return &o
+	}
+	fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("outer device registration failed (%v) - \"-through\" will not work", err)))
+	return existing
 }
 
 func mintMasque(ctx context.Context, client *http.Client, existing *masqueAccount) *masqueAccount {

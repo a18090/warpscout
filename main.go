@@ -16,7 +16,13 @@ import (
 // register needs this too - its tunnel fallback registers through one of the
 // sampled addresses.
 func setupScan(opts options) (protoRun, []netip.Addr, error) {
-	run, err := parseProto(opts.proto)
+	// -proto is the tunnel that crosses this network, which under -through is the
+	// outer one; what gets scanned then runs inside it.
+	proto := opts.proto
+	if opts.through != "" {
+		proto = opts.innerProto
+	}
+	run, err := parseProto(proto)
 	if err != nil {
 		return run, nil, err
 	}
@@ -37,7 +43,9 @@ func setupScan(opts options) (protoRun, []netip.Addr, error) {
 		}
 		scanInterface = opts.iface
 		scanSourceIP = ip
-	} else if !haveAddrFamily(opts.ipv6) {
+	} else if opts.through == "" && !haveAddrFamily(opts.ipv6) {
+		// With -through the endpoints are dialled from inside the outer tunnel,
+		// which carries both families whatever the host has.
 		return run, nil, fmt.Errorf("no routable %s address on this host - nothing to scan", famName(opts.ipv6))
 	}
 
@@ -145,6 +153,15 @@ func runScanCmd(ctx context.Context, opts options) error {
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	if opts.through != "" {
+		n, err := dialOuter(ctx, opts, time.Duration(opts.timeoutSec)*time.Second)
+		if err != nil {
+			return err
+		}
+		defer n.tunnel.Close()
+		outer = n
+	}
 	ph, err := runScanUI(ctx, cancel, opts, run, ips, time.Duration(opts.timeoutSec)*time.Second, "", "")
 	if err != nil {
 		// runScan already reported the failure through the emit seam.
@@ -329,6 +346,9 @@ func writeConfFile(opts options, ph phaseResult) {
 		return
 	}
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))
+	if outer != nil {
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("  it only reaches the region above when run over %s", outer.label)))
+	}
 	if ph.run.isMASQUE() && opts.confType != confTypeMihomo {
 		if _, port, err := net.SplitHostPort(best.endpoint); err == nil {
 			h2 := ""
@@ -407,6 +427,9 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 	if scanSourceIP.IsValid() {
 		emit(stepMsg{done: true, label: "Interface", summary: fmt.Sprintf("%s (%s)", opts.iface, scanSourceIP)})
 	}
+	if outer != nil {
+		emit(stepMsg{done: true, label: "Through", summary: outer.label})
+	}
 	if !run.isMASQUE() {
 		open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, emit)
 		if err != nil {
@@ -434,7 +457,13 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 			if pings > 0 {
 				r.tunPing, r.loss, r.measured, r.durable = rtt, loss, true, !torn
 			}
-			if hrtt, pok := pingHost(ip, timeout); pok {
+			// Host ICMP measures the direct path, which a nested run does not take;
+			// from inside the outer tunnel the same echo walks the real one.
+			if outer == nil {
+				if hrtt, pok := pingHost(ip, timeout); pok {
+					r.epPing = hrtt
+				}
+			} else if hrtt, pok := outer.pingTo(ip, timeout); pok {
 				r.epPing = hrtt
 			}
 			found := foundMsg{endpoint: endpoint, epPing: r.epPing, tunPing: r.tunPing, loss: r.loss, measured: r.measured, torn: !r.durable}
