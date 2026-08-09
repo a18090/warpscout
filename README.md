@@ -573,7 +573,13 @@ Then pass that outer endpoint to a second run through `-through`:
 warpscout scan -p awg -through 188.114.97.177:2408
 ```
 
-The first run finds an endpoint on a foreign node, the second scans through it. Every endpoint the second run reports comes out in that node's country, and `-conf` from it only reproduces that region when the config is run over the same outer endpoint.
+The first run finds an endpoint on a foreign node, the second scans through it. Every endpoint the second run reports comes out in that node's country.
+
+`-conf` from such a run is self-contained under `-conf-type mihomo`: it writes both tunnels as two proxies and gives the inner one a `dialer-proxy`, so mihomo builds the chain itself. The `native` `.conf` cannot express a chain - it is the inner tunnel alone, and only reaches that region when the client runs it over the same outer endpoint. A comment at the top of the file says so.
+
+```sh
+warpscout scan -p awg -through 188.114.97.177:2408 -conf warp.yaml -conf-type mihomo
+```
 
 `-p` keeps the meaning it has everywhere else: the protocol of the tunnel that crosses your network. Under `-through` that is the outer tunnel - the only one DPI ever sees:
 
