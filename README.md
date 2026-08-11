@@ -75,6 +75,10 @@ A scan runs in two phases.
 
 Latency is measured in the same phase: the endpoint address is pinged from the host (`ENDPOINT PING`), and with `-tun-ping` the round-trip time and packet loss inside the tunnel are measured as well (`TUN PING`, `LOSS`).
 
+Both phases in real time - phase 1 done with the ports it found, phase 2 running, and every verified endpoint appearing below it:
+
+![WARPSCOUT scan phases](.github/assets/warpscout-phases.png)
+
 The exit region and the node location are different things. A tunnel can go through Frankfurt and still come out as Russia. `SEEN AS` answers the question of which region websites see. `NODE` matters when it comes to latency, or to which filtering the traffic passes through on the way out: a node inside a censored country can drop or slow down what the same account carries fine through a node abroad.
 
 Keep in mind that a single `/24` subnet can hand out several different edge nodes, and even neighbouring addresses sometimes differ. Assuming that a subnet equals a location does not work.
@@ -319,6 +323,8 @@ The two are never compared against each other. One of them ranks the whole table
 
 `ENDPOINT PING` opens an ICMP socket and shows `?` without the right permission (see [Troubleshooting](#troubleshooting)); `TUN PING` runs inside the userspace tunnel and needs no privileges at all.
 
+![WARPSCOUT scan with -tun-ping](.github/assets/warpscout-tun-ping.png)
+
 #### Throughput: `-speed`
 
 `-speed` adds a `SPEED` column with the download throughput measured inside the tunnel:
@@ -328,6 +334,8 @@ warpscout scan -p awg -P -speed
 ```
 
 It is a phase of its own - `Speedtest phase` in the live dashboard, right after the scan is over - and it measures **one endpoint at a time**: `-jt` tunnels downloading at once would measure your uplink divided by `-jt` rather than the endpoint. Measured are exactly the endpoints the output picks - the best of each subnet in the console table, plus the best of each edge node in the report file. Every other row keeps a `-`, and the phase costs roughly three seconds per picked endpoint.
+
+![WARPSCOUT speedtest phase](.github/assets/warpscout-speed.png)
 
 The ranking does not change. Sorting stays on loss and ping, and `-best`/`-conf` pick the same endpoint they would without the flag - the speed is there to look at, not to rank by. With `-best` or `-conf -` and no report file, the phase is skipped entirely: there would be nowhere to show the column.
 
@@ -345,6 +353,14 @@ That is what DPI does to a tunnel it does not like, and it is why the tool sends
 
 This is a property of the network rather than of the endpoint. Where nothing filters WARP - a European VPS, most home links outside a censoring country - plain `-p wg` works. In Russia a plain WireGuard scan can report a couple of subnets as working, and every one of them dies right after the first handshake. In that case `-p awg` with obfuscation is what helps.
 
+The same host and the same `-p wg` scan, run twice. Without `-tun-ping` three subnets come out looking perfectly working:
+
+![WARPSCOUT wg scan without -tun-ping](.github/assets/warpscout-wg-looks-working.png)
+
+With `-tun-ping` every one of them turns out to be cut mid-stream, and the run ends with no endpoint at all:
+
+![WARPSCOUT wg scan with -tun-ping](.github/assets/warpscout-wg-torn-down.png)
+
 Only `-tun-ping` can see the teardown: observing it needs traffic in the tunnel. Torn-down endpoints are never picked by `-best` or `-conf` - they are shown so you can see how much of a pool the network is cutting. From that you can conclude that the `I1` profile is worth changing with `-gen-i1`.
 
 ### Step 3: find-junk (only if things are blocked)
@@ -358,6 +374,8 @@ warpscout find-junk -gen-i1 random
 `-gen-i1` is always worth adding. Junk packets mostly do not solve the problem; in practice the connection gets through thanks to the fake first packet, and without `-gen-i1` the search keeps the same one on every attempt. See [AmneziaWG obfuscation](#amneziawg-obfuscation) for what these are.
 
 The command rescans over and over with fresh random settings, until one set brings up at least `-threshold` percent of the sampled endpoints (95 by default). Then it prints a ready-made `warpscout scan ...` line with the working settings - all that is left is to copy it and start the scan. `Ctrl+C` or `q` at any point keeps the best set found so far.
+
+![WARPSCOUT find-junk](.github/assets/warpscout-find-junk.png)
 
 It works with AmneziaWG only and checks endpoints by handshake and ping alone, so the region and node columns stay empty.
 
@@ -619,6 +637,10 @@ warpscout scan -p awg -through 188.114.97.177:2408
 ```
 
 The first run finds an endpoint on a foreign node, the second scans through it. Every endpoint the second run reports comes out in that node's country.
+
+The same network that scans as `RU` directly, scanned through a `FRA` endpoint:
+
+![WARPSCOUT scan through another WARP tunnel](.github/assets/warpscout-through.png)
 
 `-conf` from such a run writes both tunnels either way. Under `-conf-type mihomo` the result is self-contained: two proxies, and a `dialer-proxy` on the inner one, so mihomo builds the chain itself. A `native` `.conf` cannot express a chain, so it carries the two interfaces one after the other, to be split into two files and wired up by the client - a comment at the top says as much.
 
