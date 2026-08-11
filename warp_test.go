@@ -1434,7 +1434,7 @@ func TestNewerVersion(t *testing.T) {
 }
 
 func TestReadVersionCache(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "latest-version")
+	path := filepath.Join(t.TempDir(), updateCacheName)
 	writeVersionCache(path, "0.12.0")
 	if v, ok := readVersionCache(path, time.Hour); !ok || v != "0.12.0" {
 		t.Errorf("fresh cache = %q, %v; want 0.12.0, true", v, ok)

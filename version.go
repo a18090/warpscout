@@ -19,7 +19,7 @@ const (
 
 	updateCheckTimeout = 2 * time.Second
 	updateCacheTTL     = 6 * time.Hour
-	updateCacheName    = "latest-version"
+	updateCacheName    = "warpscout-latest-version"
 )
 
 // Set through -ldflags "-X main.version=" from the git tag; see VERSIONING.md.
@@ -76,7 +76,7 @@ func updateCachePath() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(dir, "warpscout", updateCacheName)
+	return filepath.Join(dir, updateCacheName)
 }
 
 func readVersionCache(path string, ttl time.Duration) (string, bool) {
