@@ -172,19 +172,41 @@ func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
 	}
 	defer conn.Close()
 
-	var total time.Duration
-	got := 0
-	buf := make([]byte, 1500)
-	for seq := 0; seq < pingProbes; seq++ {
-		if rtt, ok := pingHostOnce(conn, dst, seq, buf, timeout); ok {
-			total += rtt
-			got++
+	_, replyType := icmpEchoTypes(dst)
+	sent := make([]time.Time, pingProbes)
+	got := make([]bool, pingProbes)
+	for seq := range sent {
+		if sendHostEcho(conn, dst, seq) {
+			sent[seq] = time.Now()
 		}
 	}
-	if got == 0 {
+
+	var total time.Duration
+	n := 0
+	buf := make([]byte, 1500)
+	deadline := time.Now().Add(timeout)
+	for n < pingProbes {
+		conn.SetReadDeadline(deadline)
+		m, _, err := conn.ReadFrom(buf)
+		if err != nil {
+			break
+		}
+		reply, err := icmp.ParseMessage(replyType.Protocol(), buf[:m])
+		if err != nil || reply.Type != replyType {
+			continue
+		}
+		echo, ok := reply.Body.(*icmp.Echo)
+		if !ok || echo.Seq < 0 || echo.Seq >= pingProbes || got[echo.Seq] || sent[echo.Seq].IsZero() {
+			continue
+		}
+		got[echo.Seq] = true
+		total += time.Since(sent[echo.Seq])
+		n++
+	}
+	if n == 0 {
 		return 0, false
 	}
-	return total / time.Duration(got), true
+	return total / time.Duration(n), true
 }
 
 func listenPing(addr netip.Addr) (*icmp.PacketConn, net.Addr) {
@@ -209,37 +231,17 @@ func listenPing(addr netip.Addr) (*icmp.PacketConn, net.Addr) {
 	return nil, nil
 }
 
-func pingHostOnce(conn *icmp.PacketConn, dst net.Addr, seq int, buf []byte, timeout time.Duration) (time.Duration, bool) {
-	echoType, replyType := icmpEchoTypes(dst)
-	msg := icmp.Message{
+func sendHostEcho(conn *icmp.PacketConn, dst net.Addr, seq int) bool {
+	echoType, _ := icmpEchoTypes(dst)
+	wire, err := (&icmp.Message{
 		Type: echoType,
 		Body: &icmp.Echo{ID: pingID, Seq: seq, Data: []byte("warpscout")},
-	}
-	wire, err := msg.Marshal(nil)
+	}).Marshal(nil)
 	if err != nil {
-		return 0, false
+		return false
 	}
-	start := time.Now()
-	if _, err := conn.WriteTo(wire, dst); err != nil {
-		return 0, false
-	}
-
-	deadline := start.Add(timeout)
-	conn.SetReadDeadline(deadline)
-	for {
-		n, _, err := conn.ReadFrom(buf)
-		if err != nil {
-			return 0, false
-		}
-		reply, err := icmp.ParseMessage(replyType.Protocol(), buf[:n])
-		if err != nil {
-			continue
-		}
-		// The udp ICMP socket rewrites the ID, so match on the echoed sequence only.
-		if echo, ok := reply.Body.(*icmp.Echo); ok && reply.Type == replyType && echo.Seq == seq {
-			return time.Since(start), true
-		}
-	}
+	_, err = conn.WriteTo(wire, dst)
+	return err == nil
 }
 
 func icmpEchoTypes(dst net.Addr) (echo, reply icmp.Type) {
