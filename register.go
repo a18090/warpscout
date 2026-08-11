@@ -29,8 +29,10 @@ const (
 	cfClientVersion = "a-6.11-2223"
 	cfUserAgent     = "okhttp/3.12.1"
 	defaultAccount  = "warpscout-account.json"
+	defaultRelay    = "https://edge-client-api.vercel.app"
 	apiReachTimeout = 3 * time.Second
 	registerTimeout = 15 * time.Second
+	relayTimeout    = 45 * time.Second
 	regTunnelMSS    = 1200
 )
 
@@ -315,6 +317,53 @@ func proxyClient(proxyURL string) (*http.Client, error) {
 	}, nil
 }
 
+type relayTripper struct {
+	base *url.URL
+	rt   http.RoundTripper
+}
+
+func (t relayTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	r := req.Clone(req.Context())
+	r.URL.Scheme, r.URL.Host = t.base.Scheme, t.base.Host
+	r.URL.Path = strings.TrimSuffix(t.base.Path, "/") + req.URL.Path
+	r.Host = ""
+	// The relay runs on fetch(), which gunzips the body but forwards the
+	// Content-Encoding header as it stands - so a transport that asked for gzip
+	// then tries to inflate plain JSON and dies with "gzip: invalid header".
+	r.Header.Set("Accept-Encoding", "identity")
+	return t.rt.RoundTrip(r)
+}
+
+const relayOff = "none"
+
+func applyRelay(o *options) error {
+	if o.relay == relayOff {
+		o.relay = ""
+		return nil
+	}
+	_, err := parseRelayURL(o.relay)
+	return err
+}
+
+func relayClient(relayURL string) (*http.Client, error) {
+	u, err := parseRelayURL(relayURL)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{
+		Timeout:   relayTimeout,
+		Transport: relayTripper{base: u, rt: regTransport(nil)},
+	}, nil
+}
+
+func parseRelayURL(relayURL string) (*url.URL, error) {
+	u, err := url.Parse(relayURL)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		return nil, fmt.Errorf("invalid -relay %q: want an http(s) URL (or \"none\" to disable)", relayURL)
+	}
+	return u, nil
+}
+
 func resolveIPv4(host string) (string, error) {
 	ips, err := net.LookupHost(host)
 	if err != nil {
@@ -369,6 +418,20 @@ func obtainAccount(ctx context.Context, o options, ips []netip.Addr, timeout tim
 	}
 
 	fmt.Fprintf(os.Stderr, "\n%s\n\n", errPal.fail("API unreachable directly"))
+
+	if o.relay != "" {
+		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("Registering through the relay (%s)...", o.relay)))
+		c, err := relayClient(o.relay)
+		if err != nil {
+			return account{}, err
+		}
+		a, err := mintAccount(ctx, c, existing)
+		if err == nil {
+			return a, nil
+		}
+		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("  relay: %v", err)))
+	}
+
 	fmt.Fprintln(os.Stderr, errPal.dim("Registering through a WARP tunnel (pass -proxy to use a proxy instead)"))
 
 	sampled := sampleAddrs(ips, tunnelDiscoverySample)

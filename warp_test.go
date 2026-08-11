@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -1346,5 +1349,65 @@ func TestIsLoaderArg(t *testing.T) {
 	}
 	if isLoaderArg(filepath.Join(dir, "other"), "./warpscout") {
 		t.Error("a path that is not the binary must not match")
+	}
+}
+
+func TestRelayTripper(t *testing.T) {
+	var gotPath, gotQuery, gotHost string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery, gotHost = r.URL.Path, r.URL.RawQuery, r.Host
+		// What the relay does: the body is already inflated, the header is not.
+		w.Header().Set("Content-Encoding", "gzip")
+		fmt.Fprint(w, `{"id":"x"}`)
+	}))
+	defer srv.Close()
+
+	for _, base := range []string{srv.URL, srv.URL + "/", srv.URL + "/relay"} {
+		c, err := relayClient(base)
+		if err != nil {
+			t.Fatalf("relayClient(%q): %v", base, err)
+		}
+		resp, err := c.Get(regBaseURL + "/abc?x=1")
+		if err != nil {
+			t.Fatalf("get through %q: %v", base, err)
+		}
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			t.Fatalf("read through %q: %v", base, err)
+		}
+		if string(body) != `{"id":"x"}` {
+			t.Errorf("base %q: body = %q", base, body)
+		}
+		want := "/v0a4005/reg/abc"
+		if strings.HasSuffix(base, "/relay") {
+			want = "/relay" + want
+		}
+		if gotPath != want {
+			t.Errorf("base %q: path = %q, want %q", base, gotPath, want)
+		}
+		if gotQuery != "x=1" {
+			t.Errorf("base %q: query = %q, want x=1", base, gotQuery)
+		}
+		if gotHost != srv.Listener.Addr().String() {
+			t.Errorf("base %q: Host = %q, want the relay's own", base, gotHost)
+		}
+	}
+}
+
+func TestApplyRelay(t *testing.T) {
+	o := options{relay: "none"}
+	if err := applyRelay(&o); err != nil || o.relay != "" {
+		t.Errorf(`"none" must disable the relay: %q, %v`, o.relay, err)
+	}
+	for _, bad := range []string{"", "cf-api.example.com", "socks5://127.0.0.1:1080"} {
+		o := options{relay: bad}
+		if err := applyRelay(&o); err == nil {
+			t.Errorf("-relay %q must be a parse error", bad)
+		}
+	}
+	o = options{relay: defaultRelay}
+	if err := applyRelay(&o); err != nil {
+		t.Errorf("defaultRelay must parse: %v", err)
 	}
 }

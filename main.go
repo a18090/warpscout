@@ -71,6 +71,9 @@ func loadScanAccount(path string) error {
 }
 
 func runRegisterCmd(ctx context.Context, opts options) error {
+	if err := applyRelay(&opts); err != nil {
+		return err
+	}
 	_, ips, err := setupScan(opts)
 	if err != nil {
 		return err
