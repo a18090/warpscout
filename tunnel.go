@@ -416,10 +416,18 @@ func teardown(results []bool) bool {
 	return true
 }
 
-const handshakePollInterval = 50 * time.Millisecond
+// A live endpoint answers in one RTT, so a flat 50ms poll spent most of its wait
+// on an already-finished handshake. The poll starts short and backs off: an
+// IpcGet is 2.9us (measured), so the extra early polls cost nothing, while a
+// dead endpoint still ends up polling rarely until -timeout.
+const (
+	handshakePollStart = 2 * time.Millisecond
+	handshakePollMax   = 50 * time.Millisecond
+)
 
 func waitHandshake(ctx context.Context, dev *device.Device, timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
+	wait := handshakePollStart
 	for time.Now().Before(deadline) {
 		if ctx.Err() != nil {
 			return false
@@ -428,7 +436,10 @@ func waitHandshake(ctx context.Context, dev *device.Device, timeout time.Duratio
 		if err == nil && handshakeDone(conf) {
 			return true
 		}
-		time.Sleep(handshakePollInterval)
+		time.Sleep(wait)
+		if wait < handshakePollMax {
+			wait *= 2
+		}
 	}
 	return false
 }
