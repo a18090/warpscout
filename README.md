@@ -54,7 +54,7 @@ Russian providers are less predictable: one machine gives you `ARN`, another `HE
 
 ![WARPSCOUT multi-node](.github/assets/warpscout-multi-node2.png)
 
-Two protocols are supported: plain WireGuard (`wg`) and AmneziaWG (`awg`), an obfuscated version of WireGuard that gets through networks where plain WireGuard is filtered.
+Three protocols are supported: plain WireGuard (`wg`), AmneziaWG (`awg`) - an obfuscated version of WireGuard that gets through networks where plain WireGuard is filtered - and MASQUE (`masque`, CONNECT-IP over QUIC, plus its TCP fallback `masque-h2`), Cloudflare's own second transport.
 
 - One static binary
 - No root and no TUN device - the tunnel runs in userspace
@@ -207,16 +207,40 @@ WARPSCOUT does what the official WARP client does on first launch: it registers 
   "id": "...",
   "token": "...",
   "private_key": "...",
-  "peer_public_key": "..."
+  "peer_public_key": "...",
+  "ipv4": "172.16.0.2",
+  "ipv6": "2606:4700:110:...",
+  "masque": {
+    "id": "...",
+    "token": "...",
+    "private_key": "...",
+    "peer_public_key": "...",
+    "ipv4": "172.16.0.2",
+    "ipv6": "2606:4700:110:..."
+  },
+  "outer": {
+    "id": "...",
+    "token": "...",
+    "private_key": "...",
+    "peer_public_key": "...",
+    "ipv4": "172.16.0.2",
+    "ipv6": "2606:4700:110:..."
+  }
 }
 ```
 
-| Field             | What it is                                                                             |
-| ----------------- | -------------------------------------------------------------------------------------- |
-| `id`              | The account Cloudflare created. Addresses later requests.                              |
-| `token`           | The bearer token that authorises them. Both are secrets.                               |
-| `private_key`     | Your side of the tunnel. Also what ends up in `-conf` configs.                         |
-| `peer_public_key` | The WARP peer's public key - shared by every endpoint, so one account covers them all. |
+| Field             | What it is                                                                                   |
+| ----------------- | -------------------------------------------------------------------------------------------- |
+| `id`              | The account Cloudflare created. Addresses later requests.                                    |
+| `token`           | The bearer token that authorises them. Both are secrets.                                     |
+| `private_key`     | Your side of the tunnel. Also what ends up in `-conf` configs.                               |
+| `peer_public_key` | The WARP peer's public key - shared by every endpoint, so one account covers them all.       |
+| `ipv4`            | The tunnel address inside WARP. The same for everyone and NAT-ed on the way out.             |
+| `ipv6`            | Your own routed v6 address. Traffic sent from someone else's is dropped.                     |
+| `masque`          | A second device enrolled as MASQUE - one device cannot be both. Serves `masque`/`masque-h2`. |
+| `outer`           | A third device for the outer tunnel of [`-through`](#warp-in-warp).                          |
+
+`masque` and `outer` are created best-effort: if Cloudflare refuses either one, `register` warns and the rest of the file still works.
 
 #### Running register again
 
