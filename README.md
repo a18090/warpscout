@@ -624,6 +624,12 @@ If you do not yet know which foreign nodes are within reach, start with a plain 
 warpscout scan -p awg
 ```
 
+If any node outside your own country will do, exclude that country and let `-best` pick the endpoint:
+
+```sh
+warpscout scan -p awg -exclude-country RU -best
+```
+
 If you already know the node you want, scan with `-node` and `-best` to pick an endpoint in one step:
 
 ```sh

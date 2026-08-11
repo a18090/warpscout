@@ -626,6 +626,12 @@ warpscout scan -p masque-h2 -conf usque.json
 warpscout scan -p awg
 ```
 
+Если подойдёт любая нода за пределами своей страны, исключите эту страну и доверьте выбор эндпоинта `-best`:
+
+```sh
+warpscout scan -p awg -exclude-country RU -best
+```
+
 Если же конкретная нода вам известна, запустите скан с `-node` и `best` для быстрого выбора эндпоинта:
 
 ```sh
