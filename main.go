@@ -470,7 +470,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		emit(stepMsg{done: true, label: "Port", summary: fmt.Sprintf("%d (pinned, phase 1 skipped)", opts.port)})
 	}
 	if !run.isMASQUE() && opts.port == 0 {
-		open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, emit)
+		open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, opts.tunnelParallel, emit)
 		if err != nil {
 			emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
 			return phaseResult{}, err

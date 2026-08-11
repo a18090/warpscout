@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"strconv"
+	"sync"
 	"time"
 
 	"golang.org/x/net/icmp"
@@ -99,34 +100,50 @@ func interfaceAddr(name string, v6 bool) (netip.Addr, error) {
 	return netip.Addr{}, fmt.Errorf("interface %s has no %s address", name, famName(v6))
 }
 
-func reachablePorts(ctx context.Context, run protoRun, ips []netip.Addr, timeout time.Duration, sample int, emit emitter) ([]int, error) {
-	tn, err := newTunnel(run)
-	if err != nil {
-		return nil, err
-	}
-	defer tn.Close()
-
+func reachablePorts(ctx context.Context, run protoRun, ips []netip.Addr, timeout time.Duration, sample, jobs int, emit emitter) ([]int, error) {
 	sampled := sampleAddrs(ips, sample)
-	if ports := probePorts(ctx, tn, sampled, primaryWarpPorts, timeout, emit, "Phase 1: probing reachable WARP ports"); len(ports) > 0 {
-		return ports, nil
+	ports, err := probePorts(ctx, run, sampled, primaryWarpPorts, timeout, jobs, emit, "Phase 1: probing reachable WARP ports")
+	if err != nil || len(ports) > 0 {
+		return ports, err
 	}
 	// No primary port got through: locked-down network, sweep the alternates.
-	return probePorts(ctx, tn, sampled, extendedWarpPorts, timeout, emit, "Phase 1: sweeping alternate WARP ports"), nil
+	return probePorts(ctx, run, sampled, extendedWarpPorts, timeout, jobs, emit, "Phase 1: sweeping alternate WARP ports")
 }
 
-func probePorts(ctx context.Context, tn tunnel, ips []netip.Addr, ports []int, timeout time.Duration, emit emitter, label string) []int {
+// One address at a time per tunnel, so the answer stays one address's port list
+// rather than a mix: the first address that answers wins and cancels the rest.
+// Sequentially this cost 4+50 ports x -timeout per dead address, measured at 109s
+// on an address that answers nothing, times the whole sample.
+func probePorts(ctx context.Context, run protoRun, ips []netip.Addr, ports []int, timeout time.Duration, jobs int, emit emitter, label string) ([]int, error) {
 	emit(barBeginMsg{label: label, total: len(ips)})
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	var mu sync.Mutex
 	open := make(map[int]bool)
-	for _, ip := range ips {
+	err := runTunnelPool(jobs, run, len(ips), func(tn tunnel, i int) {
+		defer emit(probedMsg{})
+		found := make(map[int]bool)
 		for _, port := range ports {
-			if tn.handshake(ctx, net.JoinHostPort(ip.String(), strconv.Itoa(port)), timeout) {
-				open[port] = true
+			if ctx.Err() != nil {
+				return
+			}
+			if tn.handshake(ctx, net.JoinHostPort(ips[i].String(), strconv.Itoa(port)), timeout) {
+				found[port] = true
 			}
 		}
-		emit(probedMsg{})
-		if len(open) > 0 {
-			break
+		if len(found) == 0 {
+			return
 		}
+		mu.Lock()
+		if len(open) == 0 {
+			open = found
+		}
+		mu.Unlock()
+		cancel()
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	var out []int
@@ -140,7 +157,7 @@ func probePorts(ctx context.Context, tn tunnel, ips []netip.Addr, ports []int, t
 		summary = fmt.Sprintf("reachable ports %v", out)
 	}
 	emit(barEndMsg{label: label, summary: summary})
-	return out
+	return out, nil
 }
 
 const (

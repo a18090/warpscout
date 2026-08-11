@@ -28,6 +28,9 @@ func runTunnelPool(workers int, run protoRun, n int, fn func(tn tunnel, i int)) 
 	if workers < 1 {
 		workers = 1
 	}
+	if workers > n {
+		workers = n
+	}
 
 	var tunnels []tunnel
 	for len(tunnels) < workers {
