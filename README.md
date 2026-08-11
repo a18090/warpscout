@@ -251,7 +251,9 @@ On a second run the `id` and `token` are taken from the file and only the keys c
 
 Normally this is a simple process of two requests. On a filtered network those requests do not get out at all.
 
-WARPSCOUT first checks whether `api.cloudflareclient.com` answers. If it does not, it registers _through_ a WARP tunnel: it goes over endpoint addresses, brings up a tunnel to the first one that completes a handshake, and sends the same registration requests through it. AmneziaWG is tried first, then plain WireGuard, and for AmneziaWG a few different first packets (`I1`) are cycled through as well, until one gets past the filter.
+WARPSCOUT first checks whether `api.cloudflareclient.com` answers. If it does not, it retries through the default relay: a small reverse proxy that DPI usually leaves alone. `-relay URL` points it at a relay of your own, `-relay none` skips this step entirely. How to deploy your own is described in the [nellimonix/base-relay](https://github.com/nellimonix/base-relay) repository.
+
+If the relay is unreachable too, WARPSCOUT registers _through_ a WARP tunnel: it goes over endpoint addresses, brings up a tunnel to the first one that completes a handshake, and sends the same registration requests through it. AmneziaWG is tried first, then plain WireGuard, and for AmneziaWG a few different first packets (`I1`) are cycled through as well, until one gets past the filter.
 
 If a proxy is available, `-x/-proxy` sends the registration through it and the tunnel fallback is not used at all:
 
@@ -725,5 +727,6 @@ GOMEMLIMIT=8MiB warpscout scan -p awg -gen-i1 quic -f
 - [TheyCallMeSecond/WARP-Endpoint-IP](https://github.com/TheyCallMeSecond/WARP-Endpoint-IP) - the list of IPv6 WARP subnets
 - [SagePtr/mini_quic_generator](https://github.com/SagePtr/mini_quic_generator) - the QUIC Initial packet builder ported for the `quic` I1 profile
 - [Diniboy1123/usque](https://github.com/Diniboy1123/usque) - the MASQUE reimplementation of the WARP client that `-p masque` is built on
+- [nellimonix/base-relay](https://github.com/nellimonix/base-relay) - the reverse proxy the WARP account registration fallback runs on
 - [amnezia-vpn/amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) - the user-space AmneziaWG implementation
 - [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) - the framework behind the live dashboard

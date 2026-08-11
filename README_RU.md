@@ -251,7 +251,9 @@ WARPSCOUT делает то же, что официальный клиент WAR
 
 Обычно это простой процесс, в котором отправляется 2 запроса. В фильтрующей сети эти запросы наружу не уходят вовсе.
 
-WARPSCOUT сначала проверяет, отвечает ли `api.cloudflareclient.com`. Если нет - регистрируется _через_ туннель WARP: перебирает адреса эндпоинтов, поднимает туннель к первому, с которым прошло рукопожатие, и отправляет те же самые регистрационные запросы уже через него. Сначала пробуется AmneziaWG, затем обычный WireGuard, а для AmneziaWG перебирается ещё и несколько разных первых пакетов (`I1`), пока какой-нибудь не пройдёт фильтр.
+WARPSCOUT сначала проверяет, отвечает ли `api.cloudflareclient.com`. Если нет - повторяет запросы через прослойку по умолчанию: небольшой обратный прокси, который DPI обычно не трогает. `-relay URL` указывает использовать свой собственный адрес реле, `-relay none` полностью пропускает этот шаг. Как поднять свою прослойку описано в репозитории [nellimonix/base-relay](https://github.com/nellimonix/base-relay).
+
+Если прослойка тоже недоступна, WARPSCOUT регистрируется _через_ туннель WARP: перебирает адреса эндпоинтов, поднимает туннель к первому, с которым прошло рукопожатие, и отправляет те же самые регистрационные запросы уже через него. Сначала пробуется AmneziaWG, затем обычный WireGuard, а для AmneziaWG перебирается ещё и несколько разных первых пакетов (`I1`), пока какой-нибудь не пройдёт фильтр.
 
 При наличии прокси `-x/-proxy` отправляет регистрацию через него и запасной путь через туннель вообще не задействуется:
 
@@ -727,5 +729,6 @@ GOMEMLIMIT=8MiB warpscout scan -p awg -gen-i1 quic -f
 - [TheyCallMeSecond/WARP-Endpoint-IP](https://github.com/TheyCallMeSecond/WARP-Endpoint-IP) - список IPv6-подсетей WARP
 - [SagePtr/mini_quic_generator](https://github.com/SagePtr/mini_quic_generator) - сборка QUIC Initial-пакета, портированная для профиля I1 `quic`
 - [Diniboy1123/usque](https://github.com/Diniboy1123/usque) - реализация MASQUE-клиента WARP, на которой построен `-p masque`
+- [nellimonix/base-relay](https://github.com/nellimonix/base-relay) - обратный прокси, на котором работает фолбек для регистрации WARP аккаунта
 - [amnezia-vpn/amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) - реализация AmneziaWG в пространстве пользователя
 - [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) - фреймворк, на котором сделана живая панель
