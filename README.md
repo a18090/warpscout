@@ -427,7 +427,7 @@ IPv4 ranges wider than `/20` are rejected, and IPv4 cannot be mixed with IPv6 in
 > [!WARNING]
 > For testing an endpoint, not for daily use. `socks` brings up one tunnel and keeps it: there is no reconnect and no failover, so once that tunnel drops the proxy stops working, and it does not survive a change of network either
 
-Everything the scan reports comes from Cloudflare's own `/meta` answer. `socks` hands the tunnel to any other tool instead: it dials one endpoint and serves it as a SOCKS5 proxy on localhost, so `curl`, a browser or a geo-lookup script like [ipregion](https://github.com/vernette/ipregion) can go through that exact endpoint without installing a VPN client and without root.
+Everything the scan reports comes from Cloudflare's own `/meta` answer. `socks` hands the tunnel to any other tool instead: it dials one endpoint and serves it as a SOCKS5 proxy on localhost, so `curl`, a browser or a script like [ipregion](https://github.com/vernette/ipregion) (geo lookup) or [censorcheck](https://github.com/vernette/censorcheck) (what is blocked) can go through that exact endpoint without installing a VPN client and without root.
 
 ```sh
 warpscout socks -e 188.114.99.218:2408 -p awg
