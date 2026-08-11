@@ -176,6 +176,13 @@ download_and_install() {
   chmod 755 "${INSTALL_DIR}/${BIN_NAME}"
 }
 
+check_quarantine() {
+  [ "$OS" = "darwin" ] || return 0
+  printf "\n%s\n  %s\n" \
+    "macOS may quarantine the binary. If it refuses to run:" \
+    "xattr -d com.apple.quarantine \"${INSTALL_DIR}/${BIN_NAME}\""
+}
+
 check_path() {
   case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) return 0 ;;
@@ -193,6 +200,7 @@ main() {
   check_installed
   download_and_install
   printf "%s\n%s\n" "Installed ${BIN_NAME} ${VERSION} to ${INSTALL_DIR}"
+  check_quarantine
   check_path
 }
 
