@@ -58,7 +58,7 @@ Three protocols are supported: plain WireGuard (`wg`), AmneziaWG (`awg`) - an ob
 
 - One static binary
 - No root and no TUN device - the tunnel runs in userspace
-- Linux, macOS, Windows and Docker, on `amd64` and `arm64`
+- Linux, macOS, Windows, Android (Termux) and Docker, on `amd64` and `arm64`
 - Live table while it scans, plus a report file that is easy to process (with `awk`, for example)
 
 ## How it works
@@ -81,7 +81,7 @@ Keep in mind that a single `/24` subnet can hand out several different edge node
 
 ## Install
 
-### One command (Linux, macOS, OpenWrt)
+### One command (Linux, macOS, OpenWrt, Android)
 
 With curl:
 
@@ -95,7 +95,7 @@ With wget (OpenWrt routers have no curl by default):
 wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
 ```
 
-It picks the archive for your system and puts `warpscout` into `~/.local/bin`, or into `/usr/bin` on OpenWrt. Running it again is also how you update.
+It picks the archive for your system and puts `warpscout` into `~/.local/bin`, into `/usr/bin` on OpenWrt, or into `$PREFIX/bin` in Termux. Running it again is also how you update.
 
 The script takes options after `sh -s --`, and `INSTALL_DIR` picks another directory:
 
@@ -110,13 +110,14 @@ curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.s
 
 Open the newest release on the [Releases page](https://github.com/vernette/warpscout/releases). There is one archive per OS, pick yours:
 
-| Your OS                               | File                  |
-| ------------------------------------- | --------------------- |
-| Windows                               | `windows_amd64.zip`   |
-| Mac with Apple silicon                | `darwin_arm64.tar.gz` |
-| Mac with an Intel processor           | `darwin_amd64.tar.gz` |
-| Linux, ordinary PC or server          | `linux_amd64.tar.gz`  |
-| Linux on ARM (Raspberry Pi, some VPS) | `linux_arm64.tar.gz`  |
+| Your OS                               | File                   |
+| ------------------------------------- | ---------------------- |
+| Windows                               | `windows_amd64.zip`    |
+| Mac with Apple silicon                | `darwin_arm64.tar.gz`  |
+| Mac with an Intel processor           | `darwin_amd64.tar.gz`  |
+| Linux, ordinary PC or server          | `linux_amd64.tar.gz`   |
+| Linux on ARM (Raspberry Pi, some VPS) | `linux_arm64.tar.gz`   |
+| Android, in Termux                    | `android_arm64.tar.gz` |
 
 **Linux and macOS.** Unpack the archive and make the file executable:
 

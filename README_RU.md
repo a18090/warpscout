@@ -58,7 +58,7 @@
 
 - Один статический бинарник
 - Без root и без TUN-устройства - туннель работает в userspace режиме
-- Linux, macOS, Windows и Docker, на `amd64` и `arm64`
+- Linux, macOS, Windows, Android (Termux) и Docker, на `amd64` и `arm64`
 - Живая таблица во время скана плюс файл отчёта, пригодный для обработки (например, `awk`)
 
 ## Как это работает
@@ -81,7 +81,7 @@
 
 ## Установка
 
-### Одной командой (Linux, macOS, OpenWrt)
+### Одной командой (Linux, macOS, OpenWrt, Android)
 
 Через curl:
 
@@ -95,7 +95,7 @@ curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.s
 wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh
 ```
 
-Скрипт сам подберёт архив под вашу систему и положит `warpscout` в `~/.local/bin`, а на OpenWrt - в `/usr/bin`. Скрипт можно использовать и для обновления, повторно запустив его.
+Скрипт сам подберёт архив под вашу систему и положит `warpscout` в `~/.local/bin`, на OpenWrt - в `/usr/bin`, а в Termux - в `$PREFIX/bin`. Скрипт можно использовать и для обновления, повторно запустив его.
 
 Опции передаются после `sh -s --`, а `INSTALL_DIR` выбирает другой каталог:
 
@@ -110,13 +110,14 @@ curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.s
 
 Откройте самый свежий релиз на [странице релизов](https://github.com/vernette/warpscout/releases). Там лежат по одному архиву на ОС, выберите свой:
 
-| Ваша ОС                                | Файл                  |
-| -------------------------------------- | --------------------- |
-| Windows                                | `windows_amd64.zip`   |
-| Mac на Apple silicon                   | `darwin_arm64.tar.gz` |
-| Mac на процессоре Intel                | `darwin_amd64.tar.gz` |
-| Linux, обычный ПК или сервер           | `linux_amd64.tar.gz`  |
-| Linux на ARM (Raspberry Pi, часть VPS) | `linux_arm64.tar.gz`  |
+| Ваша ОС                                | Файл                   |
+| -------------------------------------- | ---------------------- |
+| Windows                                | `windows_amd64.zip`    |
+| Mac на Apple silicon                   | `darwin_arm64.tar.gz`  |
+| Mac на процессоре Intel                | `darwin_amd64.tar.gz`  |
+| Linux, обычный ПК или сервер           | `linux_amd64.tar.gz`   |
+| Linux на ARM (Raspberry Pi, часть VPS) | `linux_arm64.tar.gz`   |
+| Android, в Termux                      | `android_arm64.tar.gz` |
 
 **Linux и macOS.** Распакуйте архив и сделайте файл исполняемым:
 
