@@ -65,7 +65,7 @@ Two protocols are supported: plain WireGuard (`wg`) and AmneziaWG (`awg`), an ob
 
 A scan runs in two phases.
 
-**Phase 1 - which ports get through.** WARP endpoints listen on several UDP ports and stay silent in response to everything except a valid WireGuard handshake. A completed handshake is therefore the only reliable test of whether a port is reachable. WARPSCOUT takes a few addresses and finds out which ports the network lets out. The common ones are tried first, and only if none of them get through are the rest swept.
+**Phase 1 - which ports get through.** WARP endpoints listen on several UDP ports and stay silent in response to everything except a valid WireGuard handshake. A completed handshake is therefore the only reliable test of whether a port is reachable. WARPSCOUT takes a few addresses and finds out which ports the network lets out. The common ones are tried first, and only if none of them get through are the rest swept. Phase 2 then walks that list per endpoint and keeps the first port that answers, so different endpoints can end up on different ports - `-port N` pins one port for the whole run and skips this phase.
 
 **Phase 2 - where each endpoint comes out.** For every address a real tunnel is brought up, and `https://speed.cloudflare.com/meta` is requested through it. That one answer has everything needed:
 
@@ -259,6 +259,7 @@ Results are sorted by packet loss first, then by ping, so the top row is the bes
 | `-speed`            | Add the `SPEED` column: after the scan, download-test every endpoint the tables pick, one at a time. Kinda slow, and it does not change the ranking - see below.                    |
 | `-n, -sample N`     | Addresses to try per subnet (default 5).                                                                                                                                     |
 | `-f, -full`         | Try all 256 addresses of every subnet. Slow but thorough.                                                                                                                    |
+| `-port N`           | Probe only this port on every endpoint, instead of taking the first reachable one. Phase 1 is skipped.                                                                        |
 | `-jt N`             | How many tunnels to run at once (default 10).                                                                                                                                |
 | `-t, -timeout N`    | Per-request timeout in seconds (default 2).                                                                                                                                  |
 | `-6, -ipv6`         | Use the IPv6 endpoint pools instead of IPv4.                                                                                                                                 |
