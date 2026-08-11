@@ -11,6 +11,8 @@ WANT_VERSION=""
 
 if [ -e /etc/openwrt_release ]; then
   DEFAULT_DIR="/usr/bin"
+elif [ -n "${TERMUX_VERSION}" ]; then
+  DEFAULT_DIR="${PREFIX}/bin"
 else
   DEFAULT_DIR="${HOME}/.local/bin"
 fi
@@ -96,8 +98,10 @@ uninstall() {
 }
 
 detect_platform() {
-  case "$(uname -s)" in
-  Linux) OS="linux" ;;
+  # Termux reports itself as Linux under uname -s, only -o says Android.
+  case "$(uname -o 2>/dev/null || uname -s)" in
+  Android) OS="android" ;;
+  Linux | GNU/Linux) OS="linux" ;;
   Darwin) OS="darwin" ;;
   *) die "Unsupported OS: $(uname -s). Windows builds are on the releases page." ;;
   esac
