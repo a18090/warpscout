@@ -72,7 +72,9 @@ jobs:
         run: |
           PREV=$(git describe --tags --abbrev=0 "${GITHUB_REF_NAME}^" 2>/dev/null || true)
           RANGE="${PREV:+$PREV..}${GITHUB_REF_NAME}"
+          NOTE=$(git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME")
           {
+            [ -n "$NOTE" ] && printf '%s\n\n' "$NOTE"
             echo "## Commits"
             echo
             git -P log --no-merges \
