@@ -34,6 +34,13 @@
 
 Cloudflare WARP hands out thousands of endpoint addresses, and there is no built-in way to choose where your tunnel comes out. WARPSCOUT tries those addresses one by one and, for each of them, shows which country the traffic appears to come from and which Cloudflare edge node the tunnel landed on. Latency and packet loss are measured along the way, so among the well-placed endpoints you can also pick a fast one.
 
+Three protocols are supported: plain WireGuard (`wg`), AmneziaWG (`awg`) - an obfuscated version of WireGuard that gets through networks where plain WireGuard is filtered - and MASQUE (`masque`, CONNECT-IP over QUIC, plus its TCP fallback `masque-h2`), Cloudflare's own second transport.
+
+- One static binary
+- No root and no TUN device - the tunnel runs in userspace
+- Linux, macOS, Windows, Android (Termux) and Docker, on `amd64` and `arm64`
+- Live table while it scans, plus a report file that is easy to process (with `awk`, for example)
+
 ### Why the edge node matters
 
 Choosing the node is what this tool was written for. Since April 2026, traffic going through the Moscow node (`DME`) is filtered by DPI inside Russia: some sites and services simply do not load through it, even though WARP itself connects fine. The same config, pointed at an endpoint with a different node, works without that problem.
@@ -53,13 +60,6 @@ How much the result tells you depends on where the server sits. On most European
 Russian providers are less predictable: one machine gives you `ARN`, another `HEL`, and some hand out four locations or more across the pools, where there is an actual choice to make:
 
 ![WARPSCOUT multi-node](.github/assets/warpscout-multi-node2.png)
-
-Three protocols are supported: plain WireGuard (`wg`), AmneziaWG (`awg`) - an obfuscated version of WireGuard that gets through networks where plain WireGuard is filtered - and MASQUE (`masque`, CONNECT-IP over QUIC, plus its TCP fallback `masque-h2`), Cloudflare's own second transport.
-
-- One static binary
-- No root and no TUN device - the tunnel runs in userspace
-- Linux, macOS, Windows, Android (Termux) and Docker, on `amd64` and `arm64`
-- Live table while it scans, plus a report file that is easy to process (with `awk`, for example)
 
 ## How it works
 
