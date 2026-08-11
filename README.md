@@ -211,12 +211,12 @@ WARPSCOUT does what the official WARP client does on first launch: it registers 
 }
 ```
 
-| Field             | What it is                                                                                       |
-| ----------------- | -------------------------------------------------------------------------------------------------- |
-| `id`              | The account Cloudflare created. Addresses later requests.                                        |
-| `token`           | The bearer token that authorises them. Both are secrets.                                         |
-| `private_key`     | Your side of the tunnel. Also what ends up in `-conf` configs.                                   |
-| `peer_public_key` | The WARP peer's public key - shared by every endpoint, so one account covers them all.           |
+| Field             | What it is                                                                             |
+| ----------------- | -------------------------------------------------------------------------------------- |
+| `id`              | The account Cloudflare created. Addresses later requests.                              |
+| `token`           | The bearer token that authorises them. Both are secrets.                               |
+| `private_key`     | Your side of the tunnel. Also what ends up in `-conf` configs.                         |
+| `peer_public_key` | The WARP peer's public key - shared by every endpoint, so one account covers them all. |
 
 #### Running register again
 
@@ -252,29 +252,29 @@ A filter that lets the handshake through and then kills the tunnel is indistingu
 
 Results are sorted by packet loss first, then by ping, so the top row is the best endpoint. Useful flags:
 
-| Flag                | What it does                                                                                                                                                                 |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Flag                | What it does                                                                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `-P, -tun-ping`     | Add the `TUN PING` and `LOSS` columns - RTT and packet loss measured inside the tunnel - and flag endpoints DPI tears down mid-stream. Off by default, since it takes longer. |
 | `-tun-ping-count N` | How many echoes per endpoint (default 10, minimum 5). Implies `-tun-ping`. The longer the burst, the more reliably it catches tunnels torn down a second or two in.           |
-| `-speed`            | Add the `SPEED` column: after the scan, download-test every endpoint the tables pick, one at a time. Kinda slow, and it does not change the ranking - see below.                    |
-| `-n, -sample N`     | Addresses to try per subnet (default 5).                                                                                                                                     |
-| `-f, -full`         | Try all 256 addresses of every subnet. Slow but thorough.                                                                                                                    |
+| `-speed`            | Add the `SPEED` column: after the scan, download-test every endpoint the tables pick, one at a time. Kinda slow, and it does not change the ranking - see below.              |
+| `-n, -sample N`     | Addresses to try per subnet (default 5).                                                                                                                                      |
+| `-f, -full`         | Try all 256 addresses of every subnet. Slow but thorough.                                                                                                                     |
 | `-port N`           | Probe only this port on every endpoint, instead of taking the first reachable one. Phase 1 is skipped.                                                                        |
-| `-jt N`             | How many tunnels to run at once (default 10).                                                                                                                                |
-| `-t, -timeout N`    | Per-request timeout in seconds (default 2).                                                                                                                                  |
-| `-6, -ipv6`         | Use the IPv6 endpoint pools instead of IPv4.                                                                                                                                 |
-| `-I, -interface`    | Send everything through a named interface (Linux; may need `CAP_NET_RAW`).                                                                                                   |
-| `-o, -output F`     | Where to write the report (default `warpscout-report-<timestamp>.txt`).                                                                                                      |
-| `-no-report`        | Do not write a report file at all.                                                                                                                                           |
-| `-emoji`            | Show country flags next to the regions. Off by default because terminals render them inconsistently.                                                                         |
-| `-plain`            | Plain line output instead of the live dashboard.                                                                                                                             |
+| `-jt N`             | How many tunnels to run at once (default 10).                                                                                                                                 |
+| `-t, -timeout N`    | Per-request timeout in seconds (default 2).                                                                                                                                   |
+| `-6, -ipv6`         | Use the IPv6 endpoint pools instead of IPv4.                                                                                                                                  |
+| `-I, -interface`    | Send everything through a named interface (Linux; may need `CAP_NET_RAW`).                                                                                                    |
+| `-o, -output F`     | Where to write the report (default `warpscout-report-<timestamp>.txt`).                                                                                                       |
+| `-no-report`        | Do not write a report file at all.                                                                                                                                            |
+| `-emoji`            | Show country flags next to the regions. Off by default because terminals render them inconsistently.                                                                          |
+| `-plain`            | Plain line output instead of the live dashboard.                                                                                                                              |
 
 There are two pings, and they sit in separate columns:
 
-| Column          | What it measures                                                                                   | Shown            |
-| --------------- | ---------------------------------------------------------------------------------------------------- | ---------------- |
+| Column          | What it measures                                                                                                      | Shown            |
+| --------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------- |
 | `ENDPOINT PING` | ICMP ping to the endpoint address itself, straight from this host - or from inside the outer tunnel under `-through`. | always           |
-| `TUN PING`      | Round-trip time to `1.1.1.1` **through** the tunnel, next to the `LOSS` measured in the same burst. | with `-tun-ping` |
+| `TUN PING`      | Round-trip time to `1.1.1.1` **through** the tunnel, next to the `LOSS` measured in the same burst.                   | with `-tun-ping` |
 
 `ENDPOINT PING` is the cheap one and says only how far away the address is; it has nothing to do with the tunnel.
 
