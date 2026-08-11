@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/amnezia-vpn/amneziawg-go/conn"
@@ -32,7 +32,7 @@ func newIPStack(local []netip.Addr, mtu int) (tun.Device, *ipStack, error) {
 	transport := &http.Transport{
 		DisableKeepAlives: true,
 		DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
-			return tnet.DialContext(ctx, "tcp", metaAddr)
+			return tnet.DialContext(ctx, "tcp", metaDialAddr())
 		},
 	}
 	return tunDev, &ipStack{tnet: tnet, client: &http.Client{Transport: transport}}, nil
@@ -266,25 +266,30 @@ func mbits(bytes int64, d time.Duration) float64 {
 	return float64(bytes) * 8 / 1e6 / d.Seconds()
 }
 
-var (
-	metaAddrMu sync.Mutex
-	metaAddr   string
-)
+var metaAddr atomic.Pointer[string]
+
+func metaDialAddr() string {
+	if p := metaAddr.Load(); p != nil {
+		return *p
+	}
+	return ""
+}
 
 // Resolved through the tunnel, not on the host: a host resolver can answer with
 // an address that only routes outside the tunnel. The first worker to get
-// through fills it in for the rest of the run.
+// through fills it in for the rest of the run. Deliberately not under a lock:
+// on a network where the lookup fails, workers holding one would time out one
+// after another instead of all at once.
 func resolveMetaAddr(ctx context.Context, tnet *netstack.Net) bool {
-	metaAddrMu.Lock()
-	defer metaAddrMu.Unlock()
-	if metaAddr != "" {
+	if metaAddr.Load() != nil {
 		return true
 	}
 	ips, err := tnet.LookupContextHost(ctx, metaHost)
 	if err != nil || len(ips) == 0 {
 		return false
 	}
-	metaAddr = net.JoinHostPort(preferV4(ips), "443")
+	addr := net.JoinHostPort(preferV4(ips), "443")
+	metaAddr.CompareAndSwap(nil, &addr)
 	return true
 }
 
