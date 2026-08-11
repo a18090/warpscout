@@ -75,12 +75,13 @@ func newWGTunnel(awg bool) (*wgTunnel, error) {
 	if err != nil {
 		return nil, err
 	}
-	bind := conn.Bind(conn.NewDefaultBind())
-	switch {
-	case outer != nil:
+	// Not conn.NewDefaultBind(): its BatchSize is 128 on Linux, so wireguard-go
+	// holds a batch of MaxMessageSize buffers per receive routine per tunnel -
+	// measured as 96% of the live heap, and the whole reason the memory limit
+	// costs CPU. A scan pushes a trickle of packets, so the batch buys nothing.
+	bind := conn.Bind(newDeviceBind(scanInterface))
+	if outer != nil {
 		bind = newTunnelBind(outer)
-	case scanInterface != "":
-		bind = newDeviceBind(scanInterface)
 	}
 	dev := device.NewDevice(tunDev, bind, device.NewLogger(device.LogLevelSilent, ""))
 

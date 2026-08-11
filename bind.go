@@ -21,7 +21,10 @@ type sourceEndpoint struct{ dst netip.AddrPort }
 func newDeviceBind(iface string) *deviceBind { return &deviceBind{iface: iface} }
 
 func (b *deviceBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
-	lc := net.ListenConfig{Control: deviceControl(b.iface, 0)}
+	var lc net.ListenConfig
+	if b.iface != "" {
+		lc.Control = deviceControl(b.iface, 0)
+	}
 	pc, err := lc.ListenPacket(context.Background(), "udp", net.JoinHostPort("", strconv.Itoa(int(port))))
 	if err != nil {
 		return nil, 0, err
