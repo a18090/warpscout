@@ -4,7 +4,9 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math"
 	"os"
+	"runtime/debug"
 )
 
 type command struct {
@@ -116,7 +118,16 @@ var commands = []command{
 	},
 }
 
+// gvisor allocates per packet, so a -f scan doubles the heap between GCs and the
+// OOM killer wins on a small host; measured, the peak plateaus at this limit.
+const defaultMemLimit = 32 << 20
+
 func main() {
+	// The runtime default is math.MaxInt64, so this leaves a GOMEMLIMIT set
+	// from the environment alone.
+	if debug.SetMemoryLimit(-1) == math.MaxInt64 {
+		debug.SetMemoryLimit(defaultMemLimit)
+	}
 	stripLoaderArg()
 	enableVirtualTerminal()
 	errPal = palette{enabled: colorEnabled(os.Stderr)}
