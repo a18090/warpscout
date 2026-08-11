@@ -117,6 +117,7 @@ var commands = []command{
 }
 
 func main() {
+	stripLoaderArg()
 	enableVirtualTerminal()
 	errPal = palette{enabled: colorEnabled(os.Stderr)}
 

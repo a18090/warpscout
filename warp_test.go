@@ -7,6 +7,8 @@ import (
 	"io"
 	"math"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -1326,5 +1328,23 @@ func TestSocksHandshakeRejects(t *testing.T) {
 	reply := udp.out.Bytes()
 	if len(reply) != 12 || reply[3] != socksBadCmd {
 		t.Errorf("non-CONNECT reply = %v, want a %d at byte 3", reply, socksBadCmd)
+	}
+}
+
+func TestIsLoaderArg(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "warpscout")
+	if err := os.WriteFile(bin, nil, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if !isLoaderArg(bin, "./warpscout") {
+		t.Error("the injected absolute path must be recognized")
+	}
+	if isLoaderArg("scan", "./warpscout") {
+		t.Error("a subcommand must not be taken for the injected path")
+	}
+	if isLoaderArg(filepath.Join(dir, "other"), "./warpscout") {
+		t.Error("a path that is not the binary must not match")
 	}
 }
