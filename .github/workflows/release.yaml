@@ -76,6 +76,7 @@ jobs:
             echo "## Commits"
             echo
             git -P log --no-merges \
+              -E --invert-grep --grep='^docs(\(.*\))?:' \
               --pretty="- %s ([\`%h\`](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/commit/%H))" \
               "$RANGE"
             echo
