@@ -415,12 +415,12 @@ warpscout socks -e 188.114.99.218:2408 -p awg
 For testing purposes ONLY.
 One tunnel, no reconnect, no failover. For everyday use take a "scan -conf" config into a real client.
 
-╭─────────────────────────────────────╮
-│ SOCKS5   socks5h://127.0.0.1:1080   │
-│ Endpoint 188.114.99.218:2408        │
-│ Tunnel   awg                        │
-│ Exit     RU, node DME (Moscow, RU)  │
-╰─────────────────────────────────────╯
+╭───────────────────────────────────╮
+│ SOCKS5   socks5h://127.0.0.1:1080 │
+│ Endpoint 188.114.99.218:2408      │
+│ Tunnel   awg                      │
+│ Exit     Moscow, RU (DME node)    │
+╰───────────────────────────────────╯
 
 Exit is what speed.cloudflare.com reports. Confirm it elsewhere:
   curl -x socks5h://127.0.0.1:1080 https://ifconfig.co/json
@@ -455,7 +455,7 @@ curl -x socks5h://127.0.0.1:1080 https://ifconfig.co/json
 ```sh
 warpscout socks -e 8.47.69.130:2408 -p awg -through 188.114.97.177:2408
 # Tunnel   wg through 188.114.97.177:2408 (awg)
-# Exit     DE, node FRA (Frankfurt-am-Main, DE)
+# Exit     Frankfurt-am-Main, DE (FRA node)
 curl -x socks5h://127.0.0.1:1080 https://ifconfig.co/json
 # "ip": "104.28.197.9", "country": "Germany", "city": "Frankfurt am Main"
 ```

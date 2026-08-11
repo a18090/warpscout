@@ -117,6 +117,14 @@ func fetchExit(ctx context.Context, tn tunnel, timeout time.Duration) (metaResul
 	return parseMeta(body), true
 }
 
+func socksExitLine(t metaResult) string {
+	node := fmt.Sprintf("%s (%s node)", exitColoLocation(t), exitColo(t))
+	if t.loc == t.coloISO {
+		return node
+	}
+	return exitRegion(t) + " via " + node
+}
+
 // The warning comes before the address on purpose: the address is what gets
 // copied, so the reader has to pass the caveat to reach it.
 func writeSocksBanner(w io.Writer, st conStyles, proxy, endpoint string, run protoRun, exit metaResult, gotExit bool) {
@@ -130,7 +138,7 @@ func writeSocksBanner(w io.Writer, st conStyles, proxy, endpoint string, run pro
 		{"Tunnel", throughLabel(run)},
 	}
 	if gotExit {
-		rows = append(rows, [2]string{"Exit", st.ok.Render(fmt.Sprintf("%s, node %s (%s)", exitRegion(exit), exitColo(exit), exitColoLocation(exit)))})
+		rows = append(rows, [2]string{"Exit", st.ok.Render(socksExitLine(exit))})
 	}
 	lines := make([]string, len(rows))
 	for i, r := range rows {
