@@ -460,7 +460,13 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 	if outer != nil {
 		emit(stepMsg{done: true, label: "Through", summary: outer.label})
 	}
-	if !run.isMASQUE() {
+	ports := masqueEndpointPorts
+	if opts.port != 0 {
+		ports = []int{opts.port}
+		warpPorts = ports
+		emit(stepMsg{done: true, label: "Port", summary: fmt.Sprintf("%d (pinned, phase 1 skipped)", opts.port)})
+	}
+	if !run.isMASQUE() && opts.port == 0 {
 		open, err := reachablePorts(ctx, run, ips, timeout, portProbeSample, emit)
 		if err != nil {
 			emit(stepMsg{fail: true, summary: fmt.Sprintf("phase 1 failed: %v", err)})
@@ -473,7 +479,7 @@ func runScan(ctx context.Context, opts options, run protoRun, ips []netip.Addr, 
 		warpPorts = open
 	}
 
-	targets := probeTargets(run, ips, masqueEndpointPorts)
+	targets := probeTargets(run, ips, ports)
 	results := make([]endpointResult, len(targets))
 	pings := opts.tunPingCount
 	label := fmt.Sprintf("Phase 2: verifying tunnels (proto=%s)", run.name)

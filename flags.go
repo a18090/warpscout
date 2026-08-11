@@ -89,6 +89,7 @@ var (
 		{"", "speed", "", "add the SPEED column: after the scan, download-test every endpoint the tables pick, one at a time (slow, and it does not change the ranking)"},
 		{"n", "sample", "N", "addresses to sample per subnet"},
 		{"f", "full", "", "scan all 256 addresses per subnet (overrides -sample)"},
+		{"", "port", "N", "probe only this port on every endpoint instead of picking the first reachable one (skips phase 1)"},
 	}, netSpecs...)}
 
 	nestGroup = flagGroup{"WARP-in-WARP", []flagSpec{
@@ -214,6 +215,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	addAWGFlags(fs, o)
 	intFlag(fs, &o.tunnelParallel, defaultTunnelJobs, "jt", "tunnel-jobs")
 	intFlag(fs, &o.perSubnet, 5, "n", "sample")
+	fs.IntVar(&o.port, "port", 0, "")
 	strFlag(fs, &o.proto, protoWG, "p", "proto")
 	strFlag(fs, &o.output, "", "o", "output")
 	fs.BoolVar(&o.noReport, "no-report", false, "")
@@ -324,6 +326,10 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	// -tun-ping-count 3, all of which -tun-ping-count 10 proved dead.
 	if o.tunPingCount > 0 && o.tunPingCount < minDurabilityPings {
 		fmt.Fprintf(os.Stderr, "-tun-ping-count must be at least %d: a shorter burst reports torn-down endpoints as working\n", minDurabilityPings)
+		os.Exit(2)
+	}
+	if o.port < 0 || o.port > 65535 {
+		fmt.Fprintln(os.Stderr, "-port must be between 1 and 65535")
 		os.Exit(2)
 	}
 	if o.genJunk {
