@@ -1411,3 +1411,38 @@ func TestApplyRelay(t *testing.T) {
 		t.Errorf("defaultRelay must parse: %v", err)
 	}
 }
+
+func TestNewerVersion(t *testing.T) {
+	cases := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"0.12.0", "0.11.9", true},
+		{"0.12.0", "0.12.0", false},
+		{"0.10.0", "0.9.0", true},
+		{"0.9.0", "0.10.0", false},
+		{"1.0.0", "0.99.9", true},
+		{"0.12.0", "dev", false},
+		{"", "0.12.0", false},
+		{"0.12", "0.11.0", false},
+	}
+	for _, c := range cases {
+		if got := newerVersion(c.latest, c.current); got != c.want {
+			t.Errorf("newerVersion(%q, %q) = %v, want %v", c.latest, c.current, got, c.want)
+		}
+	}
+}
+
+func TestReadVersionCache(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "latest-version")
+	writeVersionCache(path, "0.12.0")
+	if v, ok := readVersionCache(path, time.Hour); !ok || v != "0.12.0" {
+		t.Errorf("fresh cache = %q, %v; want 0.12.0, true", v, ok)
+	}
+	if _, ok := readVersionCache(path, -time.Second); ok {
+		t.Error("a stale cache must miss")
+	}
+	if _, ok := readVersionCache(filepath.Join(t.TempDir(), "absent"), time.Hour); ok {
+		t.Error("a missing cache must miss")
+	}
+}
