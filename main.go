@@ -195,17 +195,19 @@ func runScanCmd(ctx context.Context, opts options) error {
 	default:
 		writeConsole(os.Stdout, ph, consoleRenderer(os.Stdout), opts.tunPingCheck)
 	}
+
+	var confErr error
 	if opts.conf != "" {
-		writeConfFile(opts, ph)
+		confErr = writeConfFile(opts, ph)
 	}
 
 	if opts.noReport {
-		return nil
+		return confErr
 	}
 
 	reportPath := opts.output
 	if reportPath == "" && (opts.best || opts.conf == confStdout) {
-		return nil
+		return confErr
 	}
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
@@ -215,7 +217,7 @@ func runScanCmd(ctx context.Context, opts options) error {
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
 	}
-	return nil
+	return confErr
 }
 
 func showsSpeed(opts options) bool {
@@ -356,11 +358,10 @@ func noEndpointMsg(opts options) string {
 
 const noWorkingMsg = "every matching endpoint was torn down mid-stream"
 
-func writeConfFile(opts options, ph phaseResult) {
+func writeConfFile(opts options, ph phaseResult) error {
 	best, ok := bestOverall(ph)
 	if !ok {
-		fmt.Fprintln(os.Stderr, errPal.fail(noWorkingMsg))
-		return
+		return fmt.Errorf("%s", noWorkingMsg)
 	}
 	// The separator goes to stderr: on a terminal it still splits the config off
 	// the progress lines, and "-conf - > file" stays free of a leading blank line.
@@ -368,11 +369,10 @@ func writeConfFile(opts options, ph phaseResult) {
 		fmt.Fprintln(os.Stderr)
 	}
 	if err := writeConf(opts, best.endpoint, ph.run); err != nil {
-		fmt.Fprintln(os.Stderr, errPal.fail(fmt.Sprintf("failed to write %s: %v", opts.conf, err)))
-		return
+		return fmt.Errorf("failed to write %s: %v", opts.conf, err)
 	}
 	if opts.conf == confStdout {
-		return
+		return nil
 	}
 	fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\n%s config for %s written to %s", ph.run.name, best.endpoint, opts.conf)))
 	if outer != nil {
@@ -392,6 +392,7 @@ func writeConfFile(opts options, ph phaseResult) {
 				"  run it with: usque socks -c %s -P %s -s %s%s", opts.conf, port, masqueSNI, h2)))
 		}
 	}
+	return nil
 }
 
 func bestOverall(ph phaseResult) (endpointResult, bool) {
