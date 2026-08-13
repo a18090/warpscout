@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -152,6 +154,24 @@ func TestScanModelElapsed(t *testing.T) {
 
 	if lines := m.(scanModel).lines; !strings.Contains(lines[len(lines)-1], "in 1m0s") {
 		t.Errorf("phase line = %q, want an elapsed suffix", lines[len(lines)-1])
+	}
+}
+
+func TestPlainProgress(t *testing.T) {
+	var buf bytes.Buffer
+	plainOut = &buf
+	defer func() { plainOut = os.Stderr }()
+
+	plainEmit(probedMsg{})
+	plainEmit(barBeginMsg{label: "Phase 2", total: 25})
+	for i := 0; i < 25; i++ {
+		plainEmit(probedMsg{})
+	}
+	plainEmit(barEndMsg{label: "Phase 2", summary: "20 working"})
+
+	want := "Phase 2: 25...\n  2/25\n  4/25\n  6/25\n  8/25\n  10/25\n  12/25\n  14/25\n  16/25\n  18/25\n  20/25\n  22/25\n  24/25\nPhase 2: 20 working\n"
+	if buf.String() != want {
+		t.Errorf("plain output =\n%q\nwant\n%q", buf.String(), want)
 	}
 }
 

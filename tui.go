@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -46,36 +48,55 @@ type (
 
 type emitter func(tea.Msg)
 
-var plainNodes sync.Map
+var (
+	plainNodes sync.Map
+	plainOut   io.Writer = os.Stderr
+	plainTotal atomic.Int64
+	plainStep  atomic.Int64
+	plainDone  atomic.Int64
+)
 
 func plainEmit(msg tea.Msg) {
 	switch m := msg.(type) {
 	case stepMsg:
 		switch {
 		case m.fail:
-			fmt.Fprintln(os.Stderr, m.summary)
+			fmt.Fprintln(plainOut, m.summary)
 		case m.done:
-			fmt.Fprintf(os.Stderr, "%s: %s\n", m.label, m.summary)
+			fmt.Fprintf(plainOut, "%s: %s\n", m.label, m.summary)
 		default:
-			fmt.Fprintln(os.Stderr, m.label+"...")
+			fmt.Fprintln(plainOut, m.label+"...")
 		}
 	case barBeginMsg:
-		fmt.Fprintf(os.Stderr, "%s: %d...\n", m.label, m.total)
+		plainTotal.Store(int64(m.total))
+		plainStep.Store(int64(max(1, m.total/plainProgressSteps)))
+		plainDone.Store(0)
+		fmt.Fprintf(plainOut, "%s: %d...\n", m.label, m.total)
+	case probedMsg:
+		step, total := plainStep.Load(), plainTotal.Load()
+		if step == 0 {
+			return
+		}
+		if done := plainDone.Add(1); done%step == 0 && done < total {
+			fmt.Fprintf(plainOut, "  %d/%d\n", done, total)
+		}
 	case foundMsg:
 		if m.exit == "" || m.torn {
 			return
 		}
 		if _, seen := plainNodes.LoadOrStore(m.exit+" "+m.colo, true); !seen {
-			fmt.Fprintf(os.Stderr, "  node: %s %s (%s)\n", m.exit, m.colo, m.endpoint)
+			fmt.Fprintf(plainOut, "  node: %s %s (%s)\n", m.exit, m.colo, m.endpoint)
 		}
 	case speedMsg:
-		fmt.Fprintf(os.Stderr, "  %-22s %s\n", m.endpoint, speedStr(m.mbps))
+		fmt.Fprintf(plainOut, "  %-22s %s\n", m.endpoint, speedStr(m.mbps))
 	case barEndMsg:
-		fmt.Fprintf(os.Stderr, "%s: %s\n", m.label, m.summary)
+		fmt.Fprintf(plainOut, "%s: %s\n", m.label, m.summary)
 	}
 }
 
 const (
+	plainProgressSteps = 10
+
 	feedMax        = 12
 	nodeLineWidth  = 76
 	nodeMax        = 24
