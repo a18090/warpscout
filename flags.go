@@ -373,6 +373,7 @@ func applyCommonFlags(fs *flag.FlagSet, o *options) {
 	validateJunkParams()
 	validateMTU(*o)
 	validateConfType(*o)
+	rejectBestConfStdout(*o)
 	applyDNS(o)
 	applyTarget(o)
 	applyNode(o)
@@ -533,6 +534,15 @@ func validateMTU(o options) {
 	}
 	if o.mtu < mtuMin || o.mtu > mtuMax {
 		fmt.Fprintf(os.Stderr, "-mtu (%d) must be between %d and %d\n", o.mtu, mtuMin, mtuMax)
+		os.Exit(2)
+	}
+}
+
+// Both write a machine-readable artifact to stdout, so together they produce a
+// config with an endpoint line glued on top of it - not a config any client reads.
+func rejectBestConfStdout(o options) {
+	if o.best && o.conf == confStdout {
+		fmt.Fprintln(os.Stderr, "-best and -conf - both write to stdout: use one or the other")
 		os.Exit(2)
 	}
 }
