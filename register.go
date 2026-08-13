@@ -6,6 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -84,6 +85,20 @@ func loadAccount(path string) (account, error) {
 	}
 	if a.PrivateKey == "" || a.PeerPublicKey == "" {
 		return account{}, fmt.Errorf("%s: incomplete account", path)
+	}
+	return a, nil
+}
+
+// Only a missing file means there is nothing to rotate. Every other failure -
+// unreadable, malformed, incomplete - would otherwise register fresh and have
+// saveAccount overwrite the file the run was asked to rotate.
+func accountToRotate(path string) (account, error) {
+	a, err := loadAccount(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return account{}, nil
+	}
+	if err != nil {
+		return account{}, fmt.Errorf("%v\nfix or move %s, or pass -fresh to replace it", err, path)
 	}
 	return a, nil
 }

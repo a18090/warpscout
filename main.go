@@ -82,7 +82,9 @@ func runRegisterCmd(ctx context.Context, opts options) error {
 
 	var existing account
 	if !opts.freshAccount {
-		existing, _ = loadAccount(opts.accountPath)
+		if existing, err = accountToRotate(opts.accountPath); err != nil {
+			return err
+		}
 	}
 
 	a, err := obtainAccount(ctx, opts, ips, timeout, existing)

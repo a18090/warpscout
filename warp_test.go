@@ -1179,6 +1179,46 @@ func TestPicksTablePerNode(t *testing.T) {
 	}
 }
 
+func TestAccountToRotate(t *testing.T) {
+	dir := t.TempDir()
+
+	missing := filepath.Join(dir, "warpscout-account.json")
+	switch a, err := accountToRotate(missing); {
+	case err != nil:
+		t.Errorf("a missing account file failed instead of reading as absent: %v", err)
+	case a != (account{}):
+		t.Errorf("a missing account file returned %+v", a)
+	}
+
+	corrupt := filepath.Join(dir, "corrupt.json")
+	if err := os.WriteFile(corrupt, []byte("not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accountToRotate(corrupt); err == nil {
+		t.Error("a corrupt account file was silently treated as absent")
+	}
+
+	incomplete := filepath.Join(dir, "incomplete.json")
+	if err := os.WriteFile(incomplete, []byte(`{"id":"x"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := accountToRotate(incomplete); err == nil {
+		t.Error("an account file with no keys was silently treated as absent")
+	}
+
+	good := filepath.Join(dir, "good.json")
+	want := account{ID: "x", PrivateKey: "priv", PeerPublicKey: "pub"}
+	if err := saveAccount(good, want); err != nil {
+		t.Fatal(err)
+	}
+	switch a, err := accountToRotate(good); {
+	case err != nil:
+		t.Errorf("a valid account file failed: %v", err)
+	case a.ID != want.ID:
+		t.Errorf("loaded account %+v, want id %q", a, want.ID)
+	}
+}
+
 func TestPicksTableEmptySubnetSortsLast(t *testing.T) {
 	defer func(saved []netip.Prefix) { pools = saved }(pools)
 	pools, _ = parseTargets("192.0.2.1/32,192.0.2.2/32")
