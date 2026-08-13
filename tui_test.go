@@ -59,6 +59,11 @@ func TestScanModelFitsWindow(t *testing.T) {
 	if lines < 10 {
 		t.Errorf("view = %d lines, wastes a 20-line window", lines)
 	}
+
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 60})
+	if rows := strings.Count(m.(scanModel).View(), ":2408"); rows != feedMax {
+		t.Errorf("feed = %d rows in a tall window, want the %d cap", rows, feedMax)
+	}
 }
 
 func TestScanModelExpandFeed(t *testing.T) {

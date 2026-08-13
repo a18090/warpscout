@@ -325,7 +325,11 @@ func (m scanModel) listRows(used int) int {
 	if m.height <= 0 {
 		return feedMax
 	}
-	return max(minListRows, m.height-used-listChrome)
+	rows := max(minListRows, m.height-used-listChrome)
+	if m.feedFull {
+		return rows
+	}
+	return min(feedMax, rows)
 }
 
 func pad(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
