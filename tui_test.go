@@ -126,6 +126,28 @@ func TestScanModelCounts(t *testing.T) {
 	}
 }
 
+func TestScanModelElapsed(t *testing.T) {
+	if got := took(time.Now().Add(-92 * time.Second)); got != " in 1m32s" {
+		t.Errorf("took() = %q", got)
+	}
+	if got := took(time.Time{}); got != "" {
+		t.Errorf("took(zero) = %q, want empty", got)
+	}
+	if got := since(time.Now()); got != "" {
+		t.Errorf("since(now) = %q, want empty under a second", got)
+	}
+
+	var m tea.Model = newScanModel(nil, false)
+	m, _ = m.Update(barBeginMsg{label: "Phase 2", total: 10})
+	sm := m.(scanModel)
+	sm.barAt = time.Now().Add(-time.Minute)
+	m, _ = tea.Model(sm).Update(barEndMsg{label: "Phase 2", summary: "8 working"})
+
+	if lines := m.(scanModel).lines; !strings.Contains(lines[len(lines)-1], "in 1m0s") {
+		t.Errorf("phase line = %q, want an elapsed suffix", lines[len(lines)-1])
+	}
+}
+
 func TestScanModelNodes(t *testing.T) {
 	var m tea.Model = newScanModel(nil, false)
 

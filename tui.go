@@ -105,6 +105,8 @@ type scanModel struct {
 
 	width  int
 	height int
+	stepAt time.Time
+	barAt  time.Time
 	lines  []string
 	step   string
 	label  string
@@ -167,14 +169,15 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lines = append(m.lines, m.st.fail.Render(glyphFail+" "+msg.summary))
 		case msg.done:
 			m.step = ""
-			m.lines = append(m.lines, m.st.ok.Render(glyphOK+" ")+m.st.title.Render(msg.label)+": "+msg.summary)
+			m.lines = append(m.lines, m.st.ok.Render(glyphOK+" ")+m.st.title.Render(msg.label)+": "+msg.summary+took(m.stepAt))
+			m.stepAt = time.Time{}
 		default:
-			m.step = msg.label
+			m.step, m.stepAt = msg.label, time.Now()
 		}
 		return m, nil
 
 	case barBeginMsg:
-		m.label, m.total, m.done = msg.label, msg.total, 0
+		m.label, m.total, m.done, m.barAt = msg.label, msg.total, 0, time.Now()
 		return m, m.bar.SetPercent(0)
 
 	case probedMsg:
@@ -197,7 +200,8 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case barEndMsg:
 		m.label, m.total, m.done = "", 0, 0
-		m.lines = append(m.lines, m.st.ok.Render(glyphOK+" ")+m.st.title.Render(msg.label)+": "+msg.summary)
+		m.lines = append(m.lines, m.st.ok.Render(glyphOK+" ")+m.st.title.Render(msg.label)+": "+msg.summary+took(m.barAt))
+		m.barAt = time.Time{}
 		return m, nil
 
 	case doneMsg:
@@ -293,7 +297,7 @@ func (m scanModel) View() string {
 	}
 	if m.total > 0 {
 		b.WriteString(m.spin.View() + " " + st.title.Render(m.label) + "\n")
-		b.WriteString("  " + m.bar.View() + fmt.Sprintf("  %d/%d", m.done, m.total) + st.dim.Render(m.counts()) + "\n")
+		b.WriteString("  " + m.bar.View() + fmt.Sprintf("  %d/%d", m.done, m.total) + st.dim.Render(since(m.barAt)+m.counts()) + "\n")
 	}
 
 	nodes := ""
@@ -313,6 +317,24 @@ func (m scanModel) View() string {
 		b.WriteString("\n" + st.dim.Render(m.hint()) + "\n")
 	}
 	return b.String()
+}
+
+func since(start time.Time) string {
+	if start.IsZero() {
+		return ""
+	}
+	d := time.Since(start).Truncate(time.Second)
+	if d < time.Second {
+		return ""
+	}
+	return "  " + d.String()
+}
+
+func took(start time.Time) string {
+	if e := since(start); e != "" {
+		return " in" + e[1:]
+	}
+	return ""
 }
 
 func (m scanModel) counts() string {
