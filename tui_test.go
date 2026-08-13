@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,13 +19,19 @@ func TestScanModelFeed(t *testing.T) {
 	step(foundMsg{endpoint: "a:2408", epPing: 50 * time.Millisecond})
 	step(foundMsg{endpoint: "b:2408", epPing: 20 * time.Millisecond})
 	step(foundMsg{endpoint: "c:2408", epPing: 0})
+	step(foundMsg{endpoint: "d:2408", epPing: 20 * time.Millisecond})
 	step(probedMsg{})
 	step(probedMsg{})
 	step(probedMsg{})
 
 	sm := m.(scanModel)
-	if got := []string{sm.feed[0].endpoint, sm.feed[1].endpoint, sm.feed[2].endpoint}; got[0] != "b:2408" || got[1] != "a:2408" || got[2] != "c:2408" {
-		t.Errorf("feed order = %v, want [b a c] (by ping, unknown last)", got)
+	var got []string
+	for _, r := range sm.feed {
+		got = append(got, r.endpoint)
+	}
+	want := []string{"b:2408", "d:2408", "a:2408", "c:2408"}
+	if !slices.Equal(got, want) {
+		t.Errorf("feed order = %v, want %v (by ping, then endpoint, unknown last)", got, want)
 	}
 	if sm.done != 3 {
 		t.Errorf("probed = %d, want 3", sm.done)

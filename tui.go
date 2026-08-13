@@ -188,14 +188,12 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case foundMsg:
-		m.feed = append(m.feed, msg)
-		sort.SliceStable(m.feed, func(i, j int) bool { return lessLatency(m.feed[i], m.feed[j]) })
+		m.feed = insertSorted(m.feed, msg, lessLatency)
 		m.nodes = countNode(m.nodes, msg)
 		return m, nil
 
 	case speedMsg:
-		m.speeds = append(m.speeds, msg)
-		sort.SliceStable(m.speeds, func(i, j int) bool { return m.speeds[i].mbps > m.speeds[j].mbps })
+		m.speeds = insertSorted(m.speeds, msg, func(a, b speedMsg) bool { return a.mbps > b.mbps })
 		return m, nil
 
 	case barEndMsg:
@@ -222,6 +220,14 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+func insertSorted[T any](list []T, v T, less func(a, b T) bool) []T {
+	i := sort.Search(len(list), func(i int) bool { return less(v, list[i]) })
+	list = append(list, v)
+	copy(list[i+1:], list[i:])
+	list[i] = v
+	return list
 }
 
 func countNode(nodes []nodeStat, msg foundMsg) []nodeStat {
