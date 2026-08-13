@@ -36,3 +36,26 @@ func TestScanModelFeed(t *testing.T) {
 		t.Error("doneMsg should mark the model finished")
 	}
 }
+
+func TestScanModelNodes(t *testing.T) {
+	var m tea.Model = newScanModel(nil, false)
+
+	step := func(msg tea.Msg) { m, _ = m.Update(msg) }
+
+	step(foundMsg{endpoint: "a:2408", exit: "DE", colo: "FRA"})
+	step(foundMsg{endpoint: "b:2408", exit: "RU", colo: "DME"})
+	step(foundMsg{endpoint: "c:2408", exit: "RU", colo: "DME"})
+	step(foundMsg{endpoint: "d:2408", exit: "NL", colo: "AMS", torn: true})
+	step(foundMsg{endpoint: "e:2408"})
+
+	nodes := m.(scanModel).nodes
+	want := []nodeStat{{"RU", "DME", 2}, {"DE", "FRA", 1}}
+	if len(nodes) != len(want) {
+		t.Fatalf("nodes = %v, want %v", nodes, want)
+	}
+	for i := range want {
+		if nodes[i] != want[i] {
+			t.Errorf("nodes[%d] = %v, want %v", i, nodes[i], want[i])
+		}
+	}
+}

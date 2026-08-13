@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/progress"
@@ -44,6 +46,8 @@ type (
 
 type emitter func(tea.Msg)
 
+var plainNodes sync.Map
+
 func plainEmit(msg tea.Msg) {
 	switch m := msg.(type) {
 	case stepMsg:
@@ -57,6 +61,13 @@ func plainEmit(msg tea.Msg) {
 		}
 	case barBeginMsg:
 		fmt.Fprintf(os.Stderr, "%s: %d...\n", m.label, m.total)
+	case foundMsg:
+		if m.exit == "" || m.torn {
+			return
+		}
+		if _, seen := plainNodes.LoadOrStore(m.exit+" "+m.colo, true); !seen {
+			fmt.Fprintf(os.Stderr, "  node: %s %s (%s)\n", m.exit, m.colo, m.endpoint)
+		}
 	case speedMsg:
 		fmt.Fprintf(os.Stderr, "  %-22s %s\n", m.endpoint, speedStr(m.mbps))
 	case barEndMsg:
@@ -64,7 +75,18 @@ func plainEmit(msg tea.Msg) {
 	}
 }
 
-const feedMax = 12
+const (
+	feedMax       = 12
+	nodeMax       = 24
+	nodeLineWidth = 76
+	nodeGap       = 3
+	nodeSep       = " · "
+)
+
+type nodeStat struct {
+	exit, colo string
+	n          int
+}
 
 type scanModel struct {
 	cancel   context.CancelFunc
@@ -81,6 +103,7 @@ type scanModel struct {
 	total  int
 	done   int
 	feed   []foundMsg
+	nodes  []nodeStat
 	speeds []speedMsg
 
 	finished bool
@@ -142,6 +165,7 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case foundMsg:
 		m.feed = append(m.feed, msg)
 		sort.SliceStable(m.feed, func(i, j int) bool { return lessLatency(m.feed[i], m.feed[j]) })
+		m.nodes = countNode(m.nodes, msg)
 		return m, nil
 
 	case speedMsg:
@@ -169,6 +193,33 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+func countNode(nodes []nodeStat, msg foundMsg) []nodeStat {
+	if msg.exit == "" || msg.torn {
+		return nodes
+	}
+	found := false
+	for i := range nodes {
+		if nodes[i].exit == msg.exit && nodes[i].colo == msg.colo {
+			nodes[i].n++
+			found = true
+			break
+		}
+	}
+	if !found {
+		nodes = append(nodes, nodeStat{exit: msg.exit, colo: msg.colo, n: 1})
+	}
+	sort.SliceStable(nodes, func(i, j int) bool {
+		if nodes[i].n != nodes[j].n {
+			return nodes[i].n > nodes[j].n
+		}
+		if nodes[i].exit != nodes[j].exit {
+			return nodes[i].exit < nodes[j].exit
+		}
+		return nodes[i].colo < nodes[j].colo
+	})
+	return nodes
 }
 
 func lessLatency(a, b foundMsg) bool {
@@ -220,6 +271,9 @@ func (m scanModel) View() string {
 	if len(m.feed) > 0 {
 		b.WriteString("\n" + m.renderFeed())
 	}
+	if len(m.nodes) > 0 {
+		b.WriteString("\n" + m.renderNodes())
+	}
 	if len(m.speeds) > 0 {
 		b.WriteString("\n" + m.renderSpeeds())
 	}
@@ -247,17 +301,45 @@ func (m scanModel) renderSpeeds() string {
 	return b.String()
 }
 
-func cappedFeed[T any](rows []T) ([]T, int) {
-	if len(rows) <= feedMax {
+func cappedFeed[T any](rows []T) ([]T, int) { return capped(rows, feedMax) }
+
+func capped[T any](rows []T, n int) ([]T, int) {
+	if len(rows) <= n {
 		return rows, 0
 	}
-	return rows[:feedMax], len(rows) - feedMax
+	return rows[:n], len(rows) - n
 }
 
 func writeFeedRest(b *strings.Builder, st conStyles, extra int) {
 	if extra > 0 {
 		b.WriteString(st.dim.Render(fmt.Sprintf("… +%d more", extra)) + "\n")
 	}
+}
+
+func (m scanModel) renderNodes() string {
+	st := m.st
+	rows, extra := capped(m.nodes, nodeMax)
+	wExit, wColo, wCount := 0, 0, 0
+	for _, r := range rows {
+		wExit = max(wExit, lipgloss.Width(r.exit))
+		wColo = max(wColo, len(r.colo))
+		wCount = max(wCount, len(strconv.Itoa(r.n)))
+	}
+	cols := max(1, (nodeLineWidth+nodeGap)/(wExit+wColo+wCount+lipgloss.Width(nodeSep)+1+nodeGap))
+
+	var b strings.Builder
+	b.WriteString(st.dim.Render("NODES") + "\n")
+	for i, r := range rows {
+		exit := r.exit + strings.Repeat(" ", wExit-lipgloss.Width(r.exit))
+		b.WriteString(st.title.Render(exit) + st.dim.Render(nodeSep) + pad(r.colo, wColo) + " " + st.accent.Render(fmt.Sprintf("%*d", wCount, r.n)))
+		if i%cols == cols-1 || i == len(rows)-1 {
+			b.WriteString("\n")
+			continue
+		}
+		b.WriteString(strings.Repeat(" ", nodeGap))
+	}
+	writeFeedRest(&b, st, extra)
+	return b.String()
 }
 
 func (m scanModel) renderFeed() string {
