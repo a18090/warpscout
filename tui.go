@@ -303,7 +303,7 @@ func (m scanModel) View() string {
 	}
 	if m.total > 0 {
 		b.WriteString(m.spin.View() + " " + st.title.Render(m.label) + "\n")
-		b.WriteString("  " + m.bar.View() + fmt.Sprintf("  %d/%d", m.done, m.total) + st.dim.Render(since(m.barAt)+m.counts()) + "\n")
+		b.WriteString("  " + m.bar.View() + fmt.Sprintf("  %d/%d", m.done, m.total) + st.dim.Render(m.counts()+since(m.barAt)) + "\n")
 	}
 
 	nodes := ""
