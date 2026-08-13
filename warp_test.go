@@ -1239,6 +1239,38 @@ func TestShowsSpeed(t *testing.T) {
 	}
 }
 
+func TestWriteConfFile(t *testing.T) {
+	run := protoRun{kindWG, protoWG}
+	ep := endpointResult{endpoint: "1.2.3.4:2408", ok: true, durable: true}
+	working := phaseResult{run, []endpointResult{ep}}
+
+	dir := t.TempDir()
+	conf := filepath.Join(dir, "wg.conf")
+	if err := writeConfFile(options{conf: conf}, working); err != nil {
+		t.Fatalf("writeConfFile: %v", err)
+	}
+	if _, err := os.Stat(conf); err != nil {
+		t.Fatalf("-conf reported success without writing the file: %v", err)
+	}
+
+	missing := filepath.Join(dir, "no-such-dir", "wg.conf")
+	if err := writeConfFile(options{conf: missing}, working); err == nil {
+		t.Error("unwritable -conf path reported success")
+	}
+
+	torn := phaseResult{run, []endpointResult{{endpoint: ep.endpoint, ok: true}}}
+	tornConf := filepath.Join(dir, "torn.conf")
+	switch err := writeConfFile(options{conf: tornConf}, torn); {
+	case err == nil:
+		t.Error("-conf with nothing but torn-down endpoints reported success")
+	case err.Error() != noWorkingMsg:
+		t.Errorf("torn-down run failed with %q, want %q", err, noWorkingMsg)
+	}
+	if _, err := os.Stat(tornConf); err == nil {
+		t.Error("a config was written for a torn-down endpoint")
+	}
+}
+
 func TestReportPingColumns(t *testing.T) {
 	r := endpointResult{
 		endpoint: "1.2.3.4:2408",
