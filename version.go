@@ -71,12 +71,11 @@ func latestVersion(ctx context.Context) string {
 	return v
 }
 
+// In the temp dir rather than os.UserCacheDir(): on OpenWrt that is /root/.cache
+// on the flash overlay, and this file is disposable. The uid keeps a shared /tmp
+// from letting the first user own it and every other one silently fail to write.
 func updateCachePath() string {
-	dir, err := os.UserCacheDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(dir, updateCacheName)
+	return filepath.Join(os.TempDir(), fmt.Sprintf("%s-%d", updateCacheName, os.Getuid()))
 }
 
 func readVersionCache(path string, ttl time.Duration) (string, bool) {
@@ -96,9 +95,6 @@ func readVersionCache(path string, ttl time.Duration) (string, bool) {
 
 func writeVersionCache(path, version string) {
 	if path == "" {
-		return
-	}
-	if os.MkdirAll(filepath.Dir(path), 0755) != nil {
 		return
 	}
 	os.WriteFile(path, []byte(version+"\n"), 0644)

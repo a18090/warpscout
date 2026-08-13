@@ -101,13 +101,7 @@ wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh
 
 It picks the archive for your system and puts `warpscout` into `~/.local/bin`, into `/usr/bin` on OpenWrt, or into `$PREFIX/bin` in Termux. Running it again is also how you update.
 
-Every command except `version` checks for a new release and prints a notice if there is one. The answer is cached for 6 hours in a file named `warpscout-latest-version`:
-
-| Your OS                | Where the file is                                                                          |
-| ---------------------- | ------------------------------------------------------------------------------------------ |
-| Linux, Android (Termux) | `$XDG_CACHE_HOME/warpscout-latest-version`, by default `~/.cache/warpscout-latest-version` |
-| macOS                  | `~/Library/Caches/warpscout-latest-version`                                                |
-| Windows                | `%LocalAppData%\warpscout-latest-version`                                                  |
+Every command except `version` checks for a new release and prints a notice if there is one. The answer is cached for 6 hours in `$TMPDIR/warpscout-latest-version-<uid>` - `/tmp` on Linux, `$PREFIX/tmp` in Termux, a per-user `/var/folders/…/T/` on macOS, `%TEMP%` on Windows.
 
 Delete it to force the check to run again.
 

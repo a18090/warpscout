@@ -101,13 +101,7 @@ wget -qO- https://raw.githubusercontent.com/vernette/warpscout/master/install.sh
 
 Скрипт сам подберёт архив под вашу систему и положит `warpscout` в `~/.local/bin`, на OpenWrt - в `/usr/bin`, а в Termux - в `$PREFIX/bin`. Скрипт можно использовать и для обновления, повторно запустив его.
 
-Любая команда, кроме `version`, проверяет, нет ли нового релиза, и печатает уведомление, если она есть. Ответ кэшируется на 6 часов в файле `warpscout-latest-version`:
-
-| Ваша ОС                 | Где лежит файл                                                                               |
-| ----------------------- | -------------------------------------------------------------------------------------------- |
-| Linux, Android (Termux) | `$XDG_CACHE_HOME/warpscout-latest-version`, по умолчанию `~/.cache/warpscout-latest-version` |
-| macOS                   | `~/Library/Caches/warpscout-latest-version`                                                  |
-| Windows                 | `%LocalAppData%\warpscout-latest-version`                                                    |
+Любая команда, кроме `version`, проверяет, нет ли нового релиза, и печатает уведомление, если она есть. Ответ кэшируется на 6 часов в `$TMPDIR/warpscout-latest-version-<uid>` - это `/tmp` на Linux, `$PREFIX/tmp` в Termux, персональный `/var/folders/…/T/` на macOS и `%TEMP%` на Windows.
 
 Удалите его, чтобы проверка прошла заново.
 
