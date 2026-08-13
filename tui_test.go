@@ -113,6 +113,19 @@ func TestScanModelDropsFeedOnDone(t *testing.T) {
 	}
 }
 
+func TestScanModelCounts(t *testing.T) {
+	var m tea.Model = newScanModel(nil, false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m, _ = m.Update(barBeginMsg{label: "Phase 2", total: 10})
+	m, _ = m.Update(foundMsg{endpoint: "a:2408", exit: "DE", colo: "FRA"})
+	m, _ = m.Update(foundMsg{endpoint: "b:2408", exit: "RU", colo: "DME"})
+	m, _ = m.Update(foundMsg{endpoint: "c:2408", exit: "NL", colo: "AMS", torn: true})
+
+	if got := m.(scanModel).counts(); got != "   working 2 · torn 1 · nodes 2" {
+		t.Errorf("counts() = %q", got)
+	}
+}
+
 func TestScanModelNodes(t *testing.T) {
 	var m tea.Model = newScanModel(nil, false)
 

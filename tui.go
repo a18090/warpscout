@@ -76,16 +76,17 @@ func plainEmit(msg tea.Msg) {
 }
 
 const (
-	feedMax       = 12
-	nodeLineWidth = 76
-	nodeMax       = 24
-	nodeGap       = 3
-	nodeSep       = " · "
-	minListRows   = 3
-	listChrome    = 5
-	barWidth      = 28
-	minBarWidth   = 10
-	barMargin     = 14
+	feedMax        = 12
+	nodeLineWidth  = 76
+	nodeMax        = 24
+	nodeGap        = 3
+	nodeSep        = " · "
+	minListRows    = 3
+	listChrome     = 5
+	barWidth       = 28
+	minBarWidth    = 10
+	barMargin      = 14
+	minCountsWidth = 60
 )
 
 type nodeStat struct {
@@ -292,7 +293,7 @@ func (m scanModel) View() string {
 	}
 	if m.total > 0 {
 		b.WriteString(m.spin.View() + " " + st.title.Render(m.label) + "\n")
-		b.WriteString("  " + m.bar.View() + fmt.Sprintf("  %d/%d\n", m.done, m.total))
+		b.WriteString("  " + m.bar.View() + fmt.Sprintf("  %d/%d", m.done, m.total) + st.dim.Render(m.counts()) + "\n")
 	}
 
 	nodes := ""
@@ -312,6 +313,26 @@ func (m scanModel) View() string {
 		b.WriteString("\n" + st.dim.Render(m.hint()) + "\n")
 	}
 	return b.String()
+}
+
+func (m scanModel) counts() string {
+	if len(m.feed) == 0 || (m.width > 0 && m.width < minCountsWidth) {
+		return ""
+	}
+	torn := 0
+	for _, r := range m.feed {
+		if r.torn {
+			torn++
+		}
+	}
+	s := fmt.Sprintf("   working %d", len(m.feed)-torn)
+	if torn > 0 {
+		s += fmt.Sprintf(" · torn %d", torn)
+	}
+	if len(m.nodes) > 0 {
+		s += fmt.Sprintf(" · nodes %d", len(m.nodes))
+	}
+	return s
 }
 
 func (m scanModel) hint() string {
