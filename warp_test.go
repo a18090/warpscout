@@ -1179,6 +1179,30 @@ func TestPicksTablePerNode(t *testing.T) {
 	}
 }
 
+func TestPicksTableEmptySubnetSortsLast(t *testing.T) {
+	defer func(saved []netip.Prefix) { pools = saved }(pools)
+	pools, _ = parseTargets("192.0.2.1/32,192.0.2.2/32")
+
+	lossy := endpointResult{
+		ip:       netip.MustParseAddr("192.0.2.2"),
+		endpoint: "192.0.2.2:2408",
+		tunPing:  10 * time.Millisecond,
+		loss:     10,
+		ok:       true,
+		durable:  true,
+	}
+
+	var buf bytes.Buffer
+	r := lipgloss.NewRenderer(&buf)
+	r.SetColorProfile(termenv.Ascii)
+	writePicksTable(&buf, newConStyles(r), []endpointResult{lossy}, nil, true)
+
+	out := buf.String()
+	if strings.Index(out, "no working endpoints") < strings.Index(out, lossy.endpoint) {
+		t.Errorf("an empty subnet sorted above an endpoint with measured loss:\n%s", out)
+	}
+}
+
 func TestSpeedTargets(t *testing.T) {
 	defer func(saved []netip.Prefix) { pools = saved }(pools)
 	pools, _ = parseTargets("8.47.69.0/24,188.114.96.0/24")

@@ -472,7 +472,12 @@ func writePicksTable(w io.Writer, st conStyles, working, torn []endpointResult, 
 		cells = append(cells, "", "", "")
 		rows = append(rows, pickRow{cells, statusNone, 0, 0})
 	}
+	// Status first: a subnet with no result carries a synthetic 0% loss, which
+	// would otherwise sort it above a working endpoint that measured any loss.
 	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i].status != rows[j].status {
+			return rows[i].status < rows[j].status
+		}
 		return lessLossDur(rows[i].loss, rows[i].latency, rows[j].loss, rows[j].latency)
 	})
 
