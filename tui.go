@@ -113,6 +113,8 @@ type scanModel struct {
 	nodes  []nodeStat
 	speeds []speedMsg
 
+	feedFull bool
+	nodesAll bool
 	finished bool
 }
 
@@ -148,6 +150,12 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.finished = true
 			return m, tea.Quit
+		case "f":
+			m.feedFull = !m.feedFull
+			return m, nil
+		case "n":
+			m.nodesAll = !m.nodesAll
+			return m, nil
 		}
 
 	case stepMsg:
@@ -264,15 +272,18 @@ func (m foundMsg) lossStr() string {
 
 func (m scanModel) View() string {
 	st := m.st
+	full := m.feedFull && len(m.feed) > 0
 	var b strings.Builder
-	if m.header != "" {
+	if m.header != "" && !full {
 		b.WriteString(st.title.Render(m.header) + "\n\n")
 	}
 
-	for _, l := range m.lines {
-		b.WriteString(l + "\n")
+	if !full {
+		for _, l := range m.lines {
+			b.WriteString(l + "\n")
+		}
 	}
-	if m.step != "" {
+	if m.step != "" && !full {
 		b.WriteString(m.spin.View() + " " + st.title.Render(m.step) + "\n")
 	}
 	if m.total > 0 {
@@ -281,7 +292,7 @@ func (m scanModel) View() string {
 	}
 
 	nodes := ""
-	if len(m.nodes) > 0 {
+	if len(m.nodes) > 0 && !full {
 		nodes = "\n" + m.renderNodes()
 	}
 	rows := m.listRows(strings.Count(b.String(), "\n") + strings.Count(nodes, "\n"))
@@ -294,9 +305,20 @@ func (m scanModel) View() string {
 		b.WriteString("\n" + m.renderSpeeds(rows))
 	}
 	if !m.finished {
-		b.WriteString("\n" + st.dim.Render(m.quitHint) + "\n")
+		b.WriteString("\n" + st.dim.Render(m.hint()) + "\n")
 	}
 	return b.String()
+}
+
+func (m scanModel) hint() string {
+	keys := ""
+	if len(m.feed) > 0 {
+		keys += " · f for the feed alone"
+	}
+	if len(m.nodes) > nodeMax {
+		keys += " · n for every node"
+	}
+	return m.quitHint + keys
 }
 
 func (m scanModel) listRows(used int) int {
@@ -339,7 +361,11 @@ func writeFeedRest(b *strings.Builder, st conStyles, extra int) {
 
 func (m scanModel) renderNodes() string {
 	st := m.st
-	rows, extra := capped(m.nodes, nodeMax)
+	limit := nodeMax
+	if m.nodesAll {
+		limit = len(m.nodes)
+	}
+	rows, extra := capped(m.nodes, limit)
 	wExit, wColo, wCount := 0, 0, 0
 	for _, r := range rows {
 		wExit = max(wExit, lipgloss.Width(r.exit))

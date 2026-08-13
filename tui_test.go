@@ -61,6 +61,35 @@ func TestScanModelFitsWindow(t *testing.T) {
 	}
 }
 
+func TestScanModelExpandFeed(t *testing.T) {
+	var m tea.Model = newScanModel(nil, false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 70, Height: 20})
+	m, _ = m.Update(stepMsg{done: true, label: "Phase 1", summary: "2408"})
+	m, _ = m.Update(barBeginMsg{label: "Phase 2", total: 200})
+	for i := 0; i < 60; i++ {
+		m, _ = m.Update(foundMsg{
+			endpoint: fmt.Sprintf("1.2.3.%d:2408", i),
+			epPing:   time.Duration(i) * time.Millisecond,
+			exit:     "DE",
+			colo:     "FRA",
+		})
+	}
+
+	before := strings.Count(m.(scanModel).View(), "\n")
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}})
+	v := m.(scanModel).View()
+
+	if strings.Contains(v, "NODES") || strings.Contains(v, "Phase 1") {
+		t.Error("f should leave the feed alone on screen")
+	}
+	if rows := strings.Count(v, ":2408"); rows <= 9 {
+		t.Errorf("feed = %d rows after f, want more than the 9 it had", rows)
+	}
+	if lines := strings.Count(v, "\n"); lines > 20 || lines != before {
+		t.Errorf("view = %d lines after f, want %d (window height)", lines, before)
+	}
+}
+
 func TestScanModelNodes(t *testing.T) {
 	var m tea.Model = newScanModel(nil, false)
 
