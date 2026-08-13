@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +36,28 @@ func TestScanModelFeed(t *testing.T) {
 	step(doneMsg{})
 	if !m.(scanModel).finished {
 		t.Error("doneMsg should mark the model finished")
+	}
+}
+
+func TestScanModelFitsWindow(t *testing.T) {
+	var m tea.Model = newScanModel(nil, false)
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	m, _ = m.Update(barBeginMsg{label: "Phase 2", total: 200})
+	for i := 0; i < 200; i++ {
+		m, _ = m.Update(foundMsg{
+			endpoint: fmt.Sprintf("1.2.3.%d:2408", i),
+			epPing:   time.Duration(i) * time.Millisecond,
+			exit:     fmt.Sprintf("C%d", i%9),
+			colo:     fmt.Sprintf("N%d", i%9),
+		})
+	}
+
+	lines := strings.Count(m.(scanModel).View(), "\n")
+	if lines > 20 {
+		t.Errorf("view = %d lines, want <= 20 (window height)", lines)
+	}
+	if lines < 10 {
+		t.Errorf("view = %d lines, wastes a 20-line window", lines)
 	}
 }
 

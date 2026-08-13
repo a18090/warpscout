@@ -77,10 +77,15 @@ func plainEmit(msg tea.Msg) {
 
 const (
 	feedMax       = 12
-	nodeMax       = 24
 	nodeLineWidth = 76
+	nodeMax       = 24
 	nodeGap       = 3
 	nodeSep       = " · "
+	minListRows   = 3
+	listChrome    = 5
+	barWidth      = 28
+	minBarWidth   = 10
+	barMargin     = 14
 )
 
 type nodeStat struct {
@@ -97,6 +102,8 @@ type scanModel struct {
 	spin     spinner.Model
 	bar      progress.Model
 
+	width  int
+	height int
 	lines  []string
 	step   string
 	label  string
@@ -120,7 +127,7 @@ func newScanModel(cancel context.CancelFunc, ping bool) scanModel {
 		quitHint: "q to quit",
 		st:       st,
 		spin:     sp,
-		bar:      progress.New(progress.WithDefaultGradient(), progress.WithWidth(28)),
+		bar:      progress.New(progress.WithDefaultGradient(), progress.WithWidth(barWidth)),
 	}
 }
 
@@ -128,6 +135,11 @@ func (m scanModel) Init() tea.Cmd { return m.spin.Tick }
 
 func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.bar.Width = min(barWidth, max(minBarWidth, msg.Width-barMargin))
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c", "esc":
@@ -268,14 +280,18 @@ func (m scanModel) View() string {
 		b.WriteString("  " + m.bar.View() + fmt.Sprintf("  %d/%d\n", m.done, m.total))
 	}
 
-	if len(m.feed) > 0 {
-		b.WriteString("\n" + m.renderFeed())
-	}
+	nodes := ""
 	if len(m.nodes) > 0 {
-		b.WriteString("\n" + m.renderNodes())
+		nodes = "\n" + m.renderNodes()
 	}
+	rows := m.listRows(strings.Count(b.String(), "\n") + strings.Count(nodes, "\n"))
+
+	if len(m.feed) > 0 {
+		b.WriteString("\n" + m.renderFeed(rows))
+	}
+	b.WriteString(nodes)
 	if len(m.speeds) > 0 {
-		b.WriteString("\n" + m.renderSpeeds())
+		b.WriteString("\n" + m.renderSpeeds(rows))
 	}
 	if !m.finished {
 		b.WriteString("\n" + st.dim.Render(m.quitHint) + "\n")
@@ -283,11 +299,18 @@ func (m scanModel) View() string {
 	return b.String()
 }
 
+func (m scanModel) listRows(used int) int {
+	if m.height <= 0 {
+		return feedMax
+	}
+	return max(minListRows, m.height-used-listChrome)
+}
+
 func pad(s string, n int) string { return fmt.Sprintf("%-*s", n, s) }
 
-func (m scanModel) renderSpeeds() string {
+func (m scanModel) renderSpeeds(limit int) string {
 	st := m.st
-	rows, extra := cappedFeed(m.speeds)
+	rows, extra := capped(m.speeds, limit)
 	var b strings.Builder
 	b.WriteString(st.dim.Render(pad("ENDPOINT", 22)+" SPEED") + "\n")
 	for _, r := range rows {
@@ -300,8 +323,6 @@ func (m scanModel) renderSpeeds() string {
 	writeFeedRest(&b, st, extra)
 	return b.String()
 }
-
-func cappedFeed[T any](rows []T) ([]T, int) { return capped(rows, feedMax) }
 
 func capped[T any](rows []T, n int) ([]T, int) {
 	if len(rows) <= n {
@@ -325,7 +346,11 @@ func (m scanModel) renderNodes() string {
 		wColo = max(wColo, len(r.colo))
 		wCount = max(wCount, len(strconv.Itoa(r.n)))
 	}
-	cols := max(1, (nodeLineWidth+nodeGap)/(wExit+wColo+wCount+lipgloss.Width(nodeSep)+1+nodeGap))
+	width := nodeLineWidth
+	if m.width > 0 {
+		width = m.width
+	}
+	cols := max(1, (width+nodeGap)/(wExit+wColo+wCount+lipgloss.Width(nodeSep)+1+nodeGap))
 
 	var b strings.Builder
 	b.WriteString(st.dim.Render("NODES") + "\n")
@@ -342,9 +367,9 @@ func (m scanModel) renderNodes() string {
 	return b.String()
 }
 
-func (m scanModel) renderFeed() string {
+func (m scanModel) renderFeed(limit int) string {
 	st := m.st
-	rows, extra := cappedFeed(m.feed)
+	rows, extra := capped(m.feed, limit)
 	tunHead := ""
 	if m.ping {
 		tunHead = pad("TUN PING", 9) + " " + pad("LOSS", 6) + " "
