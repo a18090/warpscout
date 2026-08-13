@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -180,6 +181,32 @@ func intFlag(fs *flag.FlagSet, p *int, def int, short, long string) {
 	fs.IntVar(p, long, def, "")
 }
 
+func validateSample(n int) error {
+	if n < 1 {
+		return fmt.Errorf("must be at least 1")
+	}
+	return nil
+}
+
+func intFlagValidate(fs *flag.FlagSet, p *int, def int, short, long string, validate func(int) error) {
+	*p = def
+	set := func(s string) error {
+		n, err := strconv.ParseInt(s, 0, strconv.IntSize)
+		if err != nil {
+			return fmt.Errorf("parse error")
+		}
+		if err := validate(int(n)); err != nil {
+			return err
+		}
+		*p = int(n)
+		return nil
+	}
+	for _, name := range []string{short, long} {
+		fs.Func(name, "", set)
+		fs.Lookup(name).DefValue = strconv.Itoa(def)
+	}
+}
+
 func strFlag(fs *flag.FlagSet, p *string, def, short, long string) {
 	fs.StringVar(p, short, def, "")
 	fs.StringVar(p, long, def, "")
@@ -216,7 +243,7 @@ func setupScanFlags(fs *flag.FlagSet, o *options) {
 	addNetFlags(fs, o)
 	addAWGFlags(fs, o)
 	intFlag(fs, &o.tunnelParallel, defaultTunnelJobs, "jt", "tunnel-jobs")
-	intFlag(fs, &o.perSubnet, 5, "n", "sample")
+	intFlagValidate(fs, &o.perSubnet, 5, "n", "sample", validateSample)
 	fs.IntVar(&o.port, "port", 0, "")
 	strFlag(fs, &o.proto, protoWG, "p", "proto")
 	strFlag(fs, &o.output, "", "o", "output")
@@ -262,7 +289,7 @@ func setupFindJunkFlags(fs *flag.FlagSet, o *options) {
 	addNetFlags(fs, o)
 	addI1GenFlags(fs, o)
 	intFlag(fs, &o.tunnelParallel, defaultTunnelJobs, "jt", "tunnel-jobs")
-	intFlag(fs, &o.perSubnet, findJunkSample, "n", "sample")
+	intFlagValidate(fs, &o.perSubnet, findJunkSample, "n", "sample", validateSample)
 	fs.IntVar(&o.threshold, "threshold", defaultJunkThreshold, "")
 	fs.BoolVar(&o.plain, "plain", false, "")
 	o.proto = protoAWG
