@@ -113,9 +113,10 @@ type scanModel struct {
 	nodes  []nodeStat
 	speeds []speedMsg
 
-	feedFull bool
-	nodesAll bool
-	finished bool
+	feedFull  bool
+	nodesAll  bool
+	dropLists bool
+	finished  bool
 }
 
 func newScanModel(cancel context.CancelFunc, ping bool) scanModel {
@@ -200,6 +201,9 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case doneMsg:
 		m.finished = true
+		if m.dropLists {
+			m.feed, m.speeds = nil, nil
+		}
 		return m, tea.Quit
 
 	case spinner.TickMsg:

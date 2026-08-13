@@ -95,6 +95,24 @@ func TestScanModelExpandFeed(t *testing.T) {
 	}
 }
 
+func TestScanModelDropsFeedOnDone(t *testing.T) {
+	sm := newScanModel(nil, false)
+	sm.dropLists = true
+	var m tea.Model = sm
+	m, _ = m.Update(tea.WindowSizeMsg{Width: 70, Height: 30})
+	m, _ = m.Update(foundMsg{endpoint: "1.2.3.4:2408", exit: "DE", colo: "FRA"})
+	m, _ = m.Update(barEndMsg{label: "Phase 2", summary: "done"})
+	m, _ = m.Update(doneMsg{})
+
+	v := m.(scanModel).View()
+	if strings.Contains(v, ":2408") {
+		t.Error("the feed should go once the console tables repeat it")
+	}
+	if !strings.Contains(v, "NODES") || !strings.Contains(v, "Phase 2") {
+		t.Error("the node panel and the phase lines should stay")
+	}
+}
+
 func TestScanModelNodes(t *testing.T) {
 	var m tea.Model = newScanModel(nil, false)
 

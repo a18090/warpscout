@@ -227,6 +227,12 @@ func runScanCmd(ctx context.Context, opts options) error {
 	return outErr
 }
 
+// wantMeta is what only scan sets, and only scan prints the tables that repeat
+// the live feed endpoint for endpoint.
+func tablesFollow(opts options) bool {
+	return opts.wantMeta && !opts.best && opts.conf != confStdout
+}
+
 func showsSpeed(opts options) bool {
 	if !opts.best && opts.conf != confStdout {
 		return true
@@ -444,6 +450,7 @@ func runWithUI(opts options, cancel context.CancelFunc, ping bool, header, quitH
 
 	m := newScanModel(cancel, ping)
 	m.header = header
+	m.dropLists = tablesFollow(opts)
 	if quitHint != "" {
 		m.quitHint = quitHint
 	}
