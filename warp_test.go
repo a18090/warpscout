@@ -1087,6 +1087,8 @@ func TestNoEndpointMsg(t *testing.T) {
 		{"awg without gen-i1", options{proto: protoAWG}, "no working endpoints found - try -gen-i1 quic"},
 		{"wg without gen-i1", options{proto: protoWG}, "no working endpoints found - try -p awg -gen-i1 quic"},
 		{"gen-i1 already set", options{proto: protoAWG, genI1: "quic"}, "no working endpoints found"},
+		{"masque", options{proto: protoMASQUE}, masqueBlockedMsg},
+		{"masque-h2", options{proto: protoMASQUEH2}, masqueBlockedMsg},
 		{"filters win over the hint", options{proto: protoAWG, colos: []string{"HEL"}}, "no endpoint landed on node HEL"},
 	}
 	for _, c := range cases {

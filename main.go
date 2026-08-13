@@ -344,8 +344,8 @@ func noEndpointMsg(opts options) string {
 	if len(filters) > 0 {
 		return "every endpoint was excluded by " + strings.Join(filters, " and ")
 	}
-	if opts.proto == protoMASQUE {
-		return "no MASQUE endpoint passed data - this network blocks it, try -p awg"
+	if opts.proto == protoMASQUE || opts.proto == protoMASQUEH2 {
+		return masqueBlockedMsg
 	}
 	if opts.genI1 == "" {
 		if opts.proto == protoAWG {
@@ -356,7 +356,10 @@ func noEndpointMsg(opts options) string {
 	return "no working endpoints found"
 }
 
-const noWorkingMsg = "every matching endpoint was torn down mid-stream"
+const (
+	noWorkingMsg     = "every matching endpoint was torn down mid-stream"
+	masqueBlockedMsg = "no MASQUE endpoint passed data - this network blocks it, try -p awg"
+)
 
 func writeConfFile(opts options, ph phaseResult) error {
 	best, ok := bestOverall(ph)
