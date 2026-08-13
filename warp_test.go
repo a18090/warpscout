@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -138,6 +139,27 @@ func TestPingDiagnostics(t *testing.T) {
 		}
 		if loss := lossFraction(c.got, c.count); loss != c.wantLoss {
 			t.Errorf("%s: lossFraction = %v, want %v", c.name, loss, c.wantLoss)
+		}
+	}
+}
+
+func TestSameHost(t *testing.T) {
+	udp := func(s string) net.Addr { return &net.UDPAddr{IP: net.ParseIP(s)} }
+	raw := func(s string) net.Addr { return &net.IPAddr{IP: net.ParseIP(s)} }
+	cases := []struct {
+		name string
+		a, b net.Addr
+		want bool
+	}{
+		{"same ip across addr types", udp("1.2.3.4"), raw("1.2.3.4"), true},
+		{"different ip", raw("1.2.3.4"), raw("1.2.3.5"), false},
+		{"v4 and v4-mapped v6", raw("1.2.3.4"), raw("::ffff:1.2.3.4"), true},
+		{"same v6", udp("2606:4700::1"), raw("2606:4700::1"), true},
+		{"unknown addr type", &net.TCPAddr{IP: net.ParseIP("1.2.3.4")}, raw("1.2.3.4"), false},
+	}
+	for _, c := range cases {
+		if got := sameHost(c.a, c.b); got != c.want {
+			t.Errorf("%s: sameHost = %v, want %v", c.name, got, c.want)
 		}
 	}
 }

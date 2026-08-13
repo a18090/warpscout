@@ -187,9 +187,12 @@ func pingHost(addr netip.Addr, timeout time.Duration) (time.Duration, bool) {
 	deadline := time.Now().Add(timeout)
 	for n < pingProbes {
 		conn.SetReadDeadline(deadline)
-		m, _, err := conn.ReadFrom(buf)
+		m, peer, err := conn.ReadFrom(buf)
 		if err != nil {
 			break
+		}
+		if !sameHost(peer, dst) {
+			continue
 		}
 		reply, err := icmp.ParseMessage(replyType.Protocol(), buf[:m])
 		if err != nil || reply.Type != replyType {
@@ -259,6 +262,21 @@ func isV6Addr(dst net.Addr) bool {
 		return a.IP.To4() == nil
 	}
 	return false
+}
+
+func sameHost(a, b net.Addr) bool {
+	ipa, ipb := addrIP(a), addrIP(b)
+	return ipa != nil && ipa.Equal(ipb)
+}
+
+func addrIP(a net.Addr) net.IP {
+	switch v := a.(type) {
+	case *net.UDPAddr:
+		return v.IP
+	case *net.IPAddr:
+		return v.IP
+	}
+	return nil
 }
 
 func sampleAddrs(ips []netip.Addr, n int) []netip.Addr {
