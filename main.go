@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
 	"net/netip"
 	"os"
@@ -190,26 +191,30 @@ func runScanCmd(ctx context.Context, opts options) error {
 		})
 	}
 
+	// Held rather than returned: the scan itself succeeded, so the report file is
+	// still written and only the exit status carries the failure.
+	var outErr error
 	switch {
 	case opts.best:
-		printBest(ph)
+		outErr = printBest(os.Stdout, ph)
 	case opts.conf == confStdout:
 	default:
 		writeConsole(os.Stdout, ph, consoleRenderer(os.Stdout), opts.tunPingCheck)
 	}
 
-	var confErr error
 	if opts.conf != "" {
-		confErr = writeConfFile(opts, ph)
+		if err := writeConfFile(opts, ph); outErr == nil {
+			outErr = err
+		}
 	}
 
 	if opts.noReport {
-		return confErr
+		return outErr
 	}
 
 	reportPath := opts.output
 	if reportPath == "" && (opts.best || opts.conf == confStdout) {
-		return confErr
+		return outErr
 	}
 	if reportPath == "" {
 		reportPath = fmt.Sprintf("warpscout-report-%s.txt", time.Now().Format("2006-01-02-150405"))
@@ -219,7 +224,7 @@ func runScanCmd(ctx context.Context, opts options) error {
 	} else {
 		fmt.Fprintln(os.Stderr, errPal.dim(fmt.Sprintf("\nFull report written to %s", reportPath)))
 	}
-	return confErr
+	return outErr
 }
 
 func showsSpeed(opts options) bool {
@@ -411,13 +416,13 @@ func bestOverall(ph phaseResult) (endpointResult, bool) {
 	return best, found
 }
 
-func printBest(ph phaseResult) {
+func printBest(w io.Writer, ph phaseResult) error {
 	best, ok := bestOverall(ph)
 	if !ok {
-		fmt.Fprintln(os.Stderr, errPal.fail(noWorkingMsg))
-		os.Exit(1)
+		return fmt.Errorf("%s", noWorkingMsg)
 	}
-	fmt.Println(best.endpoint)
+	fmt.Fprintln(w, best.endpoint)
+	return nil
 }
 
 func runScanUI(ctx context.Context, cancel context.CancelFunc, opts options, run protoRun, ips []netip.Addr, timeout time.Duration, header, quitHint string) (phaseResult, error) {

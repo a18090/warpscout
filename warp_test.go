@@ -1305,6 +1305,31 @@ func TestShowsSpeed(t *testing.T) {
 	}
 }
 
+func TestPrintBest(t *testing.T) {
+	run := protoRun{kindWG, protoWG}
+	ep := endpointResult{endpoint: "1.2.3.4:2408", ok: true, durable: true}
+
+	var buf bytes.Buffer
+	if err := printBest(&buf, phaseResult{run, []endpointResult{ep}}); err != nil {
+		t.Fatalf("printBest: %v", err)
+	}
+	if got := strings.TrimSpace(buf.String()); got != ep.endpoint {
+		t.Errorf("-best printed %q, want %q", got, ep.endpoint)
+	}
+
+	buf.Reset()
+	torn := phaseResult{run, []endpointResult{{endpoint: ep.endpoint, ok: true}}}
+	switch err := printBest(&buf, torn); {
+	case err == nil:
+		t.Error("-best with nothing but torn-down endpoints reported success")
+	case err.Error() != noWorkingMsg:
+		t.Errorf("torn-down run failed with %q, want %q", err, noWorkingMsg)
+	}
+	if buf.Len() > 0 {
+		t.Errorf("-best printed an endpoint for a torn-down run: %q", buf.String())
+	}
+}
+
 func TestWriteConfFile(t *testing.T) {
 	run := protoRun{kindWG, protoWG}
 	ep := endpointResult{endpoint: "1.2.3.4:2408", ok: true, durable: true}
