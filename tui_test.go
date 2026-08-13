@@ -105,11 +105,11 @@ func TestScanModelDropsFeedOnDone(t *testing.T) {
 	m, _ = m.Update(doneMsg{})
 
 	v := m.(scanModel).View()
-	if strings.Contains(v, ":2408") {
-		t.Error("the feed should go once the console tables repeat it")
+	if strings.Contains(v, ":2408") || strings.Contains(v, "NODES") {
+		t.Error("the feed and the node panel should go once the report repeats them")
 	}
-	if !strings.Contains(v, "NODES") || !strings.Contains(v, "Phase 2") {
-		t.Error("the node panel and the phase lines should stay")
+	if !strings.Contains(v, "Phase 2") {
+		t.Error("the phase lines should stay")
 	}
 }
 

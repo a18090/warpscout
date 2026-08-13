@@ -202,7 +202,7 @@ func (m scanModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case doneMsg:
 		m.finished = true
 		if m.dropLists {
-			m.feed, m.speeds = nil, nil
+			m.feed, m.speeds, m.nodes = nil, nil, nil
 		}
 		return m, tea.Quit
 
