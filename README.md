@@ -114,6 +114,17 @@ curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.s
 curl -fsSL https://raw.githubusercontent.com/vernette/warpscout/master/install.sh | sh -s -- --uninstall
 ```
 
+### Arch Linux (AUR)
+
+Packaged in the AUR by [Nebulosa](https://aur.archlinux.org/account/Nebulosa), not by this repo:
+
+```sh
+paru -S warpscout      # builds from source
+paru -S warpscout-bin  # the release binary
+```
+
+[warpscout](https://aur.archlinux.org/packages/warpscout) - [warpscout-bin](https://aur.archlinux.org/packages/warpscout-bin)
+
 ### Download a binary
 
 Open the newest release on the [Releases page](https://github.com/vernette/warpscout/releases). There is one archive per OS, pick yours:
