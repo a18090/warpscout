@@ -136,6 +136,8 @@ Open the newest release on the [Releases page](https://github.com/vernette/warps
 | Mac with an Intel processor           | `darwin_amd64.tar.gz`  |
 | Linux, ordinary PC or server          | `linux_amd64.tar.gz`   |
 | Linux on ARM (Raspberry Pi, some VPS) | `linux_arm64.tar.gz`   |
+| OpenWrt router, x86_64                | `linux_amd64.tar.gz`   |
+| OpenWrt router, ARM64                 | `linux_arm64.tar.gz`   |
 | Android, in Termux                    | `android_arm64.tar.gz` |
 
 **Linux and macOS.** Unpack the archive and make the file executable:

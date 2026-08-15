@@ -136,6 +136,8 @@ paru -S warpscout-bin  # готовый бинарник из релиза
 | Mac на процессоре Intel                | `darwin_amd64.tar.gz`  |
 | Linux, обычный ПК или сервер           | `linux_amd64.tar.gz`   |
 | Linux на ARM (Raspberry Pi, часть VPS) | `linux_arm64.tar.gz`   |
+| Роутер с OpenWrt, x86_64               | `linux_amd64.tar.gz`   |
+| Роутер с OpenWrt, ARM64                | `linux_arm64.tar.gz`   |
 | Android, в Termux                      | `android_arm64.tar.gz` |
 
 **Linux и macOS.** Распакуйте архив и сделайте файл исполняемым:
