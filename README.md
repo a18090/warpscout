@@ -29,6 +29,7 @@
 - [Docker](#docker-1)
 - [Troubleshooting](#troubleshooting)
 - [Credits](#credits)
+- [Support the author](#support-the-author)
 
 ## What it is
 
@@ -775,3 +776,11 @@ GOMEMLIMIT=8MiB warpscout scan -p awg -gen-i1 quic -f
 - [nellimonix/base-relay](https://github.com/nellimonix/base-relay) - the reverse proxy the WARP account registration fallback runs on
 - [amnezia-vpn/amneziawg-go](https://github.com/amnezia-vpn/amneziawg-go) - the user-space AmneziaWG implementation
 - [charmbracelet/bubbletea](https://github.com/charmbracelet/bubbletea) - the framework behind the live dashboard
+
+## Support the author
+
+<p align="center">
+  <a href="https://pay.cloudtips.ru/p/327ef017"><img src="https://static.tildacdn.com/tild3465-3233-4263-b937-316135666261/Horiz.svg" height="40" alt="CloudTips"></a>
+  &nbsp;&nbsp;&nbsp;
+  <a href="https://nowpayments.io/donation/vernette"><img src="https://nowpayments.io/images/embeds/payments-button-white.svg" height="40" alt="NOWPayments"></a>
+</p>
