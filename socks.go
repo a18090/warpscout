@@ -19,7 +19,7 @@ import (
 
 const (
 	defaultSocksListen = "0.0.0.0"
-	defaultSocksPort   = 10800
+	defaultSocksPort   = 65003
 	socksTestingNote   = "For testing purposes ONLY."
 )
 
